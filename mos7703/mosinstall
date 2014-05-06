@@ -1,0 +1,26 @@
+clear
+echo " "
+echo "-----------------------MOS7703  INSTALL SCRIPT------------------------"
+echo "---------------------FOR LINUX 2.6.11-1.1369_FC4----------------------"
+echo " "
+if(ls mos7703.ko >>/dev/null) then
+if(grep "modprobe usbserial" /etc/rc.local >>/dev/null) then
+ echo "usbserial already Installed !!!"
+else
+ echo "modprobe usbserial" >> /etc/rc.local
+ modprobe usbserial >> /dev/null
+ echo "installed"
+fi
+if(grep "insmod /lib/modules/`uname -r`/kernel/drivers/usb/serial/moschip/mos7703.ko" /etc/rc.local >>/dev/null) then
+ echo "mos7703 Driver already Installed"
+else
+ mkdir /lib/modules/`uname -r`/kernel/drivers/usb/serial/moschip 2>/dev/null
+ cp -f mos7703.ko /lib/modules/`uname -r`/kernel/drivers/usb/serial/moschip >> /dev/null
+ echo "insmod /lib/modules/`uname -r`/kernel/drivers/usb/serial/moschip/mos7703.ko" >> /etc/rc.local 
+ insmod /lib/modules/`uname -r`/kernel/drivers/usb/serial/moschip/mos7703.ko >> /etc/rc.local
+ echo "driver installed"
+fi
+fi
+echo " "
+echo "-----------------------Thanks for using MOS7703 Driver-------------------"
+echo " "
