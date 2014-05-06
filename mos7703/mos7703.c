@@ -45,7 +45,6 @@
 
 /* all file inclusion goes here */
 
-#include <linux/config.h>
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -59,6 +58,7 @@
 #include <linux/ioctl.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
+#include <linux/usb/serial.h>
 
 #include "mos7703.h"
 #include "16C50.h"		/* 16C50 UART defines */
@@ -83,7 +83,6 @@ static int debug = 0;
 
 #endif
 
-#include "usb-serial.h"
 
 /*
  * Version Information
