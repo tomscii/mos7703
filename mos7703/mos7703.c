@@ -74,13 +74,14 @@
 #define ASP_DEBUG 0
 
 #if ASP_DEBUG
-static int debug = 1;
 #define DPRINTK(fmt, args...) printk( "%s: " fmt, __FUNCTION__ , ## args)
+#define dbg(args...) DPRINTK(args)
+#define err(args...) DPRINTK(args)
 
 #else
-static int debug = 0;
 #define DPRINTK(fmt, args...)
-
+#define dbg(args...)
+#define err(args...)
 #endif
 
 
@@ -88,8 +89,9 @@ static int debug = 0;
  * Version Information
  */
 
-#define DRIVER_VERSION "1.0.0.2FC4"
+#define DRIVER_AUTHOR "Moschip Ltd."
 #define DRIVER_DESC "Moschip 7703 USB Serial Driver"
+#define DRIVER_VERSION "1.0.0.2FC4"
 
 /*
  * Defines used for sending commands to port 
@@ -111,6 +113,9 @@ static int serial_paranoia_check(struct usb_serial *serial,
 static int port_paranoia_check(struct usb_serial_port *port,
 			       const char *function);
 #endif
+
+static struct usb_serial_driver mcs7703_1port_driver;
+
 /*
 static pid_t thread_pid;
 int ThreadState = 0;
@@ -119,14 +124,6 @@ static int restore_state_thread(void *);
 
 /* all structre defination goes here */
 /* all local variables decleration goes here */
-
-static struct usb_driver mcs7703_driver = {
-	.owner = THIS_MODULE,
-	.name = "Moschip7703",
-	.probe = usb_serial_probe,
-	.disconnect = usb_serial_disconnect,
-	.id_table = id_table_combined,
-};
 
 /************************************************************************/
 /*            U S B  C A L L B A C K   F U N C T I O N S                */
@@ -141,7 +138,7 @@ static struct usb_driver mcs7703_driver = {
  *
  *****************************************************************************/
 
-static void mos7703_interrupt_callback(struct urb *urb, struct pt_regs *regs)
+static void mos7703_interrupt_callback(struct urb *urb)
 {
 	int length;
 	int result;
@@ -216,7 +213,7 @@ static void mos7703_interrupt_callback(struct urb *urb, struct pt_regs *regs)
  *
  *****************************************************************************/
 
-static void mos7703_bulk_in_callback(struct urb *urb, struct pt_regs *regs)
+static void mos7703_bulk_in_callback(struct urb *urb)
 {
 	int status;
 	unsigned char *data;
@@ -224,8 +221,8 @@ static void mos7703_bulk_in_callback(struct urb *urb, struct pt_regs *regs)
 	struct usb_serial_port *port;
 	struct moschip_serial *mos7703_serial;
 	struct moschip_port *mos7703_port;
-	int i;
 	struct tty_struct *tty;
+	int i;
 
 	if (urb->status) {
 		DPRINTK("nonzero read bulk status received: %d\n", urb->status);
@@ -258,18 +255,22 @@ static void mos7703_bulk_in_callback(struct urb *urb, struct pt_regs *regs)
 	if (urb->actual_length) {
 
 //MATRIX
-		tty = mos7703_port->port->tty;
+		tty = mos7703_port->tty;
 		if (tty) {
 			for (i = 0; i < urb->actual_length; ++i) {
 				/* if we insert more than TTY_FLIPBUF_SIZE characters, we drop them. */
+                                #if 0 // tom: no field tty->flip
 				if (tty->flip.count >= TTY_FLIPBUF_SIZE) {
-					tty_flip_buffer_push(tty);
+				#else
+				if (1) {
+				#endif
+					tty_flip_buffer_push(tty->port);
 				}
 				/* this doesn't actually push the data through unless tty->low_latency is set */
-				tty_insert_flip_char(tty, data[i], 0);
+				tty_insert_flip_char(tty->port, data[i], 0);
 				DPRINTK(" READ : %c \n", data[i]);
 			}
-			tty_flip_buffer_push(tty);
+			tty_flip_buffer_push(tty->port);
 		}
 //MATRIX
 	}
@@ -300,8 +301,7 @@ static void mos7703_bulk_in_callback(struct urb *urb, struct pt_regs *regs)
  *
  *****************************************************************************/
 
-static void mos7703_bulk_out_data_callback(struct urb *urb,
-					   struct pt_regs *regs)
+static void mos7703_bulk_out_data_callback(struct urb *urb)
 {
 	struct moschip_port *mos7703_port;
 	struct tty_struct *tty;
@@ -323,7 +323,7 @@ static void mos7703_bulk_out_data_callback(struct urb *urb,
 		return;
 	}
 #endif
-	tty = mos7703_port->port->tty;
+	tty = mos7703_port->tty;
 
 	if (tty) {
 
@@ -331,9 +331,9 @@ static void mos7703_bulk_out_data_callback(struct urb *urb,
 		 */
 
 		if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
-		    tty->ldisc.write_wakeup) {
+		    tty->ldisc->ops->write_wakeup) {
 
-			(tty->ldisc.write_wakeup) (tty);
+			(tty->ldisc->ops->write_wakeup) (tty);
 		}
 
 		/* tell the tty driver that something has changed */
@@ -464,7 +464,7 @@ return 0;
  * If successful, we return 0
  * Otherwise we return a negative error number.
  *****************************************************************************/
-static int mos7703_open(struct usb_serial_port *port, struct file *filp)
+static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 {
 	int response;
 	char data;
@@ -472,7 +472,7 @@ static int mos7703_open(struct usb_serial_port *port, struct file *filp)
 	struct usb_serial *serial;
 	struct usb_serial_port *port0;
 	struct urb *urb;
-	struct termios *old_termios;
+	struct ktermios *old_termios;
 	struct moschip_serial *mos7703_serial;
 	struct moschip_port *mos7703_port;
 
@@ -612,10 +612,10 @@ static int mos7703_open(struct usb_serial_port *port, struct file *filp)
      * through,otherwise it is scheduled, and with high data rates (like with
      *  OHCI) data can get lost.
      */
-
-	if (port->tty)
-		port->tty->low_latency = 1;
-
+#if 0 // tom: no field low_latency
+	if (tty)
+		tty->low_latency = 1;
+#endif
 	DPRINTK("port number is %d \n", port->number);
 	DPRINTK("port bulk in endpoint is %x \n",
 		port->bulk_in_endpointAddress);
@@ -710,7 +710,7 @@ static int mos7703_open(struct usb_serial_port *port, struct file *filp)
 	mos7703_port->openPending = FALSE;
 	mos7703_port->open = TRUE;
 
-	change_port_settings(mos7703_port, old_termios);
+	change_port_settings(tty, mos7703_port, old_termios);
 	/* create the txfifo */
 	mos7703_port->txfifo.head = 0;
 	mos7703_port->txfifo.tail = 0;
@@ -725,7 +725,7 @@ static int mos7703_open(struct usb_serial_port *port, struct file *filp)
 
 	if (!mos7703_port->txfifo.fifo) {
 		dbg("%s - no memory", __FUNCTION__);
-		mos7703_close(port, filp);
+		mos7703_close(port);
 		return -ENOMEM;
 	}
 	DPRINTK("%s(%d) - Initialize TX fifo to %d bytes", __FUNCTION__,
@@ -750,7 +750,7 @@ static int mos7703_open(struct usb_serial_port *port, struct file *filp)
  * mos7703_close
  * this function is called by the tty driver when a port is closed
  *****************************************************************************/
-static void mos7703_close(struct usb_serial_port *port, struct file *filp)
+static void mos7703_close(struct usb_serial_port *port)
 {
 	struct usb_serial *serial;
 	struct moschip_serial *mos7703_serial;
@@ -801,13 +801,11 @@ static void mos7703_close(struct usb_serial_port *port, struct file *filp)
 		}
 	}
 
-	/* While closing port shutdown all bulk read write and interrupt read if 
-	 * they exists */
+	/* While closing port shutdown all bulk read write and interrupt read if
+	   they exist */
 
 	if (serial->dev) {
-
-/* flush and block until tx is empty*/
-
+                /* flush and block until tx is empty*/
 		if (mos7703_port->write_urb) {
 			DPRINTK("%s", "Shutdown bulk write\n");
 			usb_kill_urb(mos7703_port->write_urb);
@@ -844,8 +842,9 @@ static void mos7703_close(struct usb_serial_port *port, struct file *filp)
  * SerialBreak
  * this function sends a break to the port
  *****************************************************************************/
-static void mos7703_break(struct usb_serial_port *port, int break_state)
+static void mos7703_break(struct tty_struct *tty, int break_state)
 {
+	struct usb_serial_port *port = tty->driver_data;
 	struct usb_serial *serial;
 	struct moschip_serial *mos7703_serial;
 	struct moschip_port *mos7703_port;
@@ -866,7 +865,7 @@ static void mos7703_break(struct usb_serial_port *port, int break_state)
 #endif
 	/*
 	   mos7703_serial = (struct moschip_serial *)serial->private;
-	   mos7703_port = (struct moschip_port *)port->private;
+	   Mos7703_port = (struct moschip_port *)port->private;
 	 */
 	mos7703_serial = usb_get_serial_data(serial);
 	mos7703_port = usb_get_serial_port_data(port);
@@ -889,8 +888,9 @@ static void mos7703_break(struct usb_serial_port *port, int break_state)
  * (the txCredits), 
  * Otherwise we return a negative error number.
  *****************************************************************************/
-static int mos7703_write_room(struct usb_serial_port *port)
+static int mos7703_write_room(struct tty_struct *tty)
 {
+	struct usb_serial_port *port = tty->driver_data;
 	int i;
 	int room = 0;
 	struct moschip_port *mos7703_port;
@@ -928,8 +928,9 @@ static int mos7703_write_room(struct usb_serial_port *port)
  * system,
  * Otherwise we return a negative error number.
  *****************************************************************************/
-static int mos7703_chars_in_buffer(struct usb_serial_port *port)
+static int mos7703_chars_in_buffer(struct tty_struct *tty)
 {
+	struct usb_serial_port *port = tty->driver_data;
 	int i;
 	int chars = 0;
 	struct moschip_port *mos7703_port;
@@ -964,7 +965,7 @@ static int mos7703_chars_in_buffer(struct usb_serial_port *port)
  * a negative error number.
  *****************************************************************************/
 //static int mos7703_write (struct usb_serial_port *port, int from_user, const unsigned char *data, int count)
-static int mos7703_write(struct usb_serial_port *port,
+static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 			 const unsigned char *data, int count)
 {
 	int i;
@@ -1088,10 +1089,10 @@ static int mos7703_write(struct usb_serial_port *port,
  * this function is called by the tty driver when it wants to stop the data
  * being read from the port.
  *****************************************************************************/
-static void mos7703_throttle(struct usb_serial_port *port)
+static void mos7703_throttle(struct tty_struct *tty)
 {
+	struct usb_serial_port *port = tty->driver_data;
 	struct moschip_port *mos7703_port;
-	struct tty_struct *tty;
 	int status;
 
 #ifdef xyz
@@ -1111,7 +1112,6 @@ static void mos7703_throttle(struct usb_serial_port *port)
 		return;
 	}
 
-	tty = port->tty;
 	if (!tty) {
 		dbg("%s - no tty available", __FUNCTION__);
 		return;
@@ -1123,14 +1123,14 @@ static void mos7703_throttle(struct usb_serial_port *port)
 		unsigned char stop_char = STOP_CHAR(tty);
 
 		//status = mos7703_write (port, 0, &stop_char, 1);
-		status = mos7703_write(port, &stop_char, 1);
+		status = mos7703_write(tty, port, &stop_char, 1);
 		if (status <= 0) {
 			return;
 		}
 	}
 
 	/* if we are implementing RTS/CTS, toggle that line */
-	if (tty->termios->c_cflag & CRTSCTS) {
+	if (tty->termios.c_cflag & CRTSCTS) {
 
 		mos7703_port->shadowMCR &= ~MCR_RTS;
 		status = SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, MCR,
@@ -1148,10 +1148,10 @@ static void mos7703_throttle(struct usb_serial_port *port)
  * this function is called by the tty driver when it wants to resume the data
  * being read from the port (called after SerialThrottle is called)
  *****************************************************************************/
-static void mos7703_unthrottle(struct usb_serial_port *port)
+static void mos7703_unthrottle(struct tty_struct *tty)
 {
+	struct usb_serial_port *port = tty->driver_data;
 	struct moschip_port *mos7703_port = usb_get_serial_port_data(port);
-	struct tty_struct *tty;
 	int status;
 
 #ifdef xyz
@@ -1167,8 +1167,6 @@ static void mos7703_unthrottle(struct usb_serial_port *port)
 		dbg("%s - port not opened", __FUNCTION__);
 		return;
 	}
-
-	tty = port->tty;
 	if (!tty) {
 		dbg("%s - no tty available", __FUNCTION__);
 		return;
@@ -1181,7 +1179,7 @@ static void mos7703_unthrottle(struct usb_serial_port *port)
 		unsigned char start_char = START_CHAR(tty);
 
 		//status = mos7703_write (port, 0, &start_char, 1);
-		status = mos7703_write(port, &start_char, 1);
+		status = mos7703_write(tty, port, &start_char, 1);
 
 		if (status <= 0) {
 			return;
@@ -1189,7 +1187,7 @@ static void mos7703_unthrottle(struct usb_serial_port *port)
 	}
 
 	/* if we are implementing RTS/CTS, toggle that line */
-	if (tty->termios->c_cflag & CRTSCTS) {
+	if (tty->termios.c_cflag & CRTSCTS) {
 		mos7703_port->shadowMCR |= MCR_RTS;
 		status = SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, MCR,
 				    &mos7703_port->shadowMCR);
@@ -1205,14 +1203,14 @@ static void mos7703_unthrottle(struct usb_serial_port *port)
  * SerialSetTermios
  * this function is called by the tty driver when it wants to change the termios structure
  *****************************************************************************/
-static void mos7703_set_termios(struct usb_serial_port *port,
-				struct termios *old_termios)
+static void mos7703_set_termios(struct tty_struct *tty,
+				struct usb_serial_port *port,
+				struct ktermios *old_termios)
 {
 	int status;
 	unsigned int cflag;
 	struct usb_serial *serial;
 	struct moschip_port *mos7703_port;
-	struct tty_struct *tty;
 
 #ifdef xyz
 	if (port_paranoia_check(port, __FUNCTION__)) {
@@ -1231,10 +1229,8 @@ static void mos7703_set_termios(struct usb_serial_port *port,
 	if (mos7703_port == NULL)
 		return;
 
-	tty = port->tty;
-
-	if (!port->tty || !port->tty->termios) {
-		dbg("%s - no tty or termios", __FUNCTION__);
+	if (!tty) {
+		dbg("%s - no tty", __FUNCTION__);
 		return;
 	}
 
@@ -1243,12 +1239,12 @@ static void mos7703_set_termios(struct usb_serial_port *port,
 		return;
 	}
 
-	cflag = tty->termios->c_cflag;
+	cflag = tty->termios.c_cflag;
 
 	/* check that they really want us to change something */
 	if (old_termios) {
 		if ((cflag == old_termios->c_cflag) &&
-		    (RELEVANT_IFLAG(tty->termios->c_iflag) ==
+		    (RELEVANT_IFLAG(tty->termios.c_iflag) ==
 		     RELEVANT_IFLAG(old_termios->c_iflag))) {
 
 			DPRINTK("%s\n", "Nothing to change");
@@ -1267,7 +1263,7 @@ static void mos7703_set_termios(struct usb_serial_port *port,
 	dbg("%s - port %d", __FUNCTION__, port->number);
 
 	/* change the port settings to the new ones specified */
-	change_port_settings(mos7703_port, old_termios);
+	change_port_settings(tty, mos7703_port, old_termios);
 
 	if (mos7703_port->read_urb->status != -EINPROGRESS) {
 
@@ -1293,7 +1289,8 @@ static void mos7703_set_termios(struct usb_serial_port *port,
  *      transmit holding register is empty.  This functionality
  *      allows an RS485 driver to be written in user space. 
  *****************************************************************************/
-static int get_lsr_info(struct moschip_port *mos7703_port, unsigned int *value)
+static int get_lsr_info(struct tty_struct *tty,
+		struct moschip_port *mos7703_port, unsigned int __user *value)
 {
 	unsigned int result = 0;
 
@@ -1310,11 +1307,12 @@ static int get_lsr_info(struct moschip_port *mos7703_port, unsigned int *value)
 	return 0;
 }
 
-static int get_number_bytes_avail(struct moschip_port *mos7703_port,
+#if 0 // tom: belongs to dropped ioctl cmd
+static int get_number_bytes_avail(struct tty_struct *tty,
+				  struct moschip_port *mos7703_port,
 				  unsigned int *value)
 {
 	unsigned int result = 0;
-	struct tty_struct *tty = mos7703_port->port->tty;
 
 	if (!tty)
 		return -ENOIOCTLCMD;
@@ -1328,7 +1326,9 @@ static int get_number_bytes_avail(struct moschip_port *mos7703_port,
 
 	return -ENOIOCTLCMD;
 }
+#endif
 
+#if 0 // this is unused, but may be useful to compare w/ set_high_rates() below
 static int set_higher_rates(struct moschip_port *mos7703_port, int *value)
 {
 	unsigned int arg;
@@ -1403,6 +1403,7 @@ static int set_higher_rates(struct moschip_port *mos7703_port, int *value)
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
 	return 0;
 }
+#endif
 
 static int set_high_rates(struct moschip_port *mos7703_port, int *value)
 {
@@ -1651,8 +1652,8 @@ static int get_serial_info(struct moschip_port *mos7703_port,
 	memset(&tmp, 0, sizeof(tmp));
 
 	tmp.type = PORT_16550A;
-	tmp.line = mos7703_port->port->serial->minor;
-	tmp.port = mos7703_port->port->number;
+	tmp.line = mos7703_port->port->minor;
+	tmp.port = mos7703_port->port->port_number;
 	tmp.irq = 0;
 	tmp.flags = ASYNC_SKIP_TEST | ASYNC_AUTO_IRQ;
 	tmp.xmit_fifo_size = mos7703_port->maxTxCredits;
@@ -1670,9 +1671,10 @@ static int get_serial_info(struct moschip_port *mos7703_port,
  * SerialIoctl
  * this function handles any ioctl calls to the driver
  *****************************************************************************/
-static int mos7703_ioctl(struct usb_serial_port *port, struct file *file,
+static int mos7703_ioctl(struct tty_struct *tty,
 			 unsigned int cmd, unsigned long arg)
 {
+	struct usb_serial_port *port = tty->driver_data;
 	struct moschip_port *mos7703_port;
 
 	struct async_icount cnow;
@@ -1693,15 +1695,15 @@ static int mos7703_ioctl(struct usb_serial_port *port, struct file *file,
 
 	switch (cmd) {
 		/* return number of bytes available */
-
+#if 0 // tom: this seems not supported by mos7720, so maybe we can drop this
 	case TIOCINQ:
 		dbg("%s (%d) TIOCINQ", __FUNCTION__, port->number);
-		return get_number_bytes_avail(mos7703_port,
+		return get_number_bytes_avail(tty, mos7703_port,
 					      (unsigned int *)arg);
-
+#endif
 	case TIOCSERGETLSR:
 		dbg("%s (%d) TIOCSERGETLSR", __FUNCTION__, port->number);
-		return get_lsr_info(mos7703_port, (unsigned int *)arg);
+		return get_lsr_info(tty, mos7703_port, (unsigned int *)arg);
 
 	case TIOCMBIS:
 	case TIOCMBIC:
@@ -1816,7 +1818,8 @@ static int send_cmd_write_baud_rate(struct moschip_port *mos7703_port,
 		return -1;
 	}
 #endif
-	number = mos7703_port->port->number - mos7703_port->port->serial->minor;
+
+	number = mos7703_port->port->port_number - mos7703_port->port->minor;
 
 	dbg("%s - port = %d, baud = %d", __FUNCTION__,
 	    mos7703_port->port->number, baudRate);
@@ -1911,10 +1914,10 @@ static int calc_baud_rate_divisor(int baudrate, int *divisor)
  * This routine is called to set the UART on the device to match 
  * the specified new settings.
  *****************************************************************************/
-static void change_port_settings(struct moschip_port *mos7703_port,
-				 struct termios *old_termios)
+static void change_port_settings(struct tty_struct *tty,
+				 struct moschip_port *mos7703_port,
+				 struct ktermios *old_termios)
 {
-	struct tty_struct *tty;
 	int baud;
 	unsigned cflag;
 	unsigned iflag;
@@ -1949,10 +1952,8 @@ static void change_port_settings(struct moschip_port *mos7703_port,
 		return;
 	}
 
-	tty = mos7703_port->port->tty;
-
-	if ((!tty) || (!tty->termios)) {
-		dbg("%s - no tty structures", __FUNCTION__);
+	if (!tty) {
+		dbg("%s - no tty structure", __FUNCTION__);
 		return;
 	}
 
@@ -1960,9 +1961,9 @@ static void change_port_settings(struct moschip_port *mos7703_port,
 	lStop = LCR_STOP_1;
 	lParity = LCR_PAR_NONE;
 
-	/*Change the data length */
-	cflag = tty->termios->c_cflag;
-	iflag = tty->termios->c_iflag;
+	/* Change the data length */
+	cflag = tty->termios.c_cflag;
+	iflag = tty->termios.c_iflag;
 
 	switch (cflag & CSIZE) {
 	case CS5:
@@ -2114,6 +2115,13 @@ static void change_port_settings(struct moschip_port *mos7703_port,
 	return;
 }
 
+// XXX is this needed?
+static int mos77xx_probe(struct usb_serial *serial,
+			 const struct usb_device_id *id)
+{
+	return 0;
+}
+
 /****************************************************************************
  * mos7703_startup
  ****************************************************************************/
@@ -2184,39 +2192,43 @@ static int mos7703_startup(struct usb_serial *serial)
 
 }
 
-/****************************************************************************
- * mos7703_shutdown
- * This function is called whenever the device is removed from the usb bus.
- ****************************************************************************/
-static void mos7703_shutdown(struct usb_serial *serial)
-{
-	int i;
+static struct usb_serial_driver mcs7703_1port_driver = {
+	.driver = {
+		.owner =	THIS_MODULE,
+		.name =		"moschip7703",
+	},
+	.description = "Moschip 7703 1-port usb-to-serial adapter",
+	.id_table = id_table,
+	.num_ports = 1,
 
-/* MATRIX  */
-	// ThreadState = 1;
-/* MATRIX  */
+	.probe = mos77xx_probe,
+	.attach = mos7703_startup,
 
-	if (!serial) {
-		DPRINTK("%s", "Invalid Handler \n");
-		return;
-	}
+	.open = mos7703_open,
+	.close = mos7703_close,
+	.write = mos7703_write,
 
-	/* free private structure allocated for serial port 
-	 * stop reads and writes on all ports */
+	.write_room = mos7703_write_room,
+	.ioctl = mos7703_ioctl,
+	.set_termios = mos7703_set_termios,
+	.break_ctl = mos7703_break,
+	.chars_in_buffer = mos7703_chars_in_buffer,
+	.throttle = mos7703_throttle,
+	.unthrottle = mos7703_unthrottle,
+/*      .tiocmget = mos7703_tiocmget, */
+/*      .tiocmset = mos7703_tiocmset,*/
+	.read_bulk_callback = mos7703_bulk_in_callback,
+	.read_int_callback = mos7703_interrupt_callback
+};
 
-	for (i = 0; i < serial->num_ports; ++i) {
-
-		kfree(usb_get_serial_port_data(serial->port[i]));
-		usb_set_serial_port_data(serial->port[i], NULL);
-
-	}
-
-	/* free private structure allocated for serial device */
-
-	kfree(serial->private);
-	serial->private = NULL;
-
-}
+#if 0
+static struct usb_driver mcs7703_driver = {
+	.owner = THIS_MODULE,
+	.name = "Moschip7703",
+	.probe = usb_serial_probe,
+	.disconnect = usb_serial_disconnect,
+	.id_table = id_table_combined,
+};
 
 static struct usb_serial_device_type moschip7703_1port_device = {
 	.owner = THIS_MODULE,
@@ -2247,6 +2259,7 @@ static struct usb_serial_device_type moschip7703_1port_device = {
 	.break_ctl = mos7703_break,
 	.read_bulk_callback = mos7703_bulk_in_callback,
 };
+#endif /* 0 */
 
 #ifdef xyz
 static struct usb_serial *get_usb_serial(struct usb_serial_port *port,
@@ -2304,58 +2317,13 @@ static int port_paranoia_check(struct usb_serial_port *port,
 }
 
 #endif
-/****************************************************************************
- * moschip7703_init
- * This is called by the module subsystem, or on startup to initialize us
- ****************************************************************************/
-int __init moschip7703_init(void)
-{
-	int retval;
 
-	retval = usb_serial_register(&moschip7703_1port_device);
-	//printk("%s usb_serial_register:retval:%d\n",__FUNCTION__,retval);
-	if (retval)
-		goto failed_port_device_register;
+static struct usb_serial_driver * const serial_drivers[] = {
+	&mcs7703_1port_driver, NULL
+};
 
-	info(DRIVER_DESC " " DRIVER_VERSION);
+module_usb_serial_driver(serial_drivers, id_table);
 
-	retval = usb_register(&mcs7703_driver);
-
-	//printk("%s usb_register :retval:%d\n",__FUNCTION__,retval);
-	if (retval)
-		goto failed_usb_register;
-
-	if (retval == 0) {
-		DPRINTK("%s\n", "Leaving...");
-		return 0;
-	}
-
- failed_usb_register:
-	usb_serial_deregister(&moschip7703_1port_device);
-
- failed_port_device_register:
-	return retval;
-
-	return 0;
-}
-
-/****************************************************************************
- * moschip7703_exit
- * Called when the driver is about to be unloaded.
- ****************************************************************************/
-void __exit moschip7703_exit(void)
-{
-
-	usb_deregister(&mcs7703_driver);
-	usb_serial_deregister(&moschip7703_1port_device);
-
-}
-
-module_init(moschip7703_init);
-module_exit(moschip7703_exit);
-
-/* Module information */
+MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
-
-MODULE_PARM_DESC(debug, "Debug enabled or not");

@@ -201,19 +201,11 @@ struct moschip_product_info {
 
 };
 
-/*
-static struct usb_device_id moschip_port_id_table [] = {
-	{ USB_DEVICE(USB_VENDOR_ID_MOSCHIP,MOSCHIP_DEVICE_ID_7703) },
-	{ } 
-}; */
-
-//static __devinitdata struct usb_device_id id_table_combined [] = {
-static struct usb_device_id id_table_combined[] = {
+static struct usb_device_id id_table[] = {
 	{USB_DEVICE(USB_VENDOR_ID_MOSCHIP, MOSCHIP_DEVICE_ID_7703)},
-	{}			/* terminating entry */
+	{} /* terminating entry */
 };
-
-MODULE_DEVICE_TABLE(usb, id_table_combined);
+MODULE_DEVICE_TABLE(usb, id_table);
 
 #if 0
 
@@ -309,6 +301,7 @@ struct moschip_port {
 
 	struct async_icount icount;
 	struct usb_serial_port *port;	/* loop back to the owner of this object */
+	struct tty_struct *tty;
 	struct urb *write_urb_pool[NUM_URBS];
 };
 
@@ -377,28 +370,27 @@ static struct divisor_table_entry divisor_table[] = {
 /* local function prototypes */
 
 /* function prototypes for all URB callbacks */
-static void mos7703_interrupt_callback(struct urb *urb, struct pt_regs *regs);
-static void mos7703_bulk_in_callback(struct urb *urb, struct pt_regs *regs);
-static void mos7703_bulk_out_data_callback(struct urb *urb,
-					   struct pt_regs *regs);
+static void mos7703_interrupt_callback(struct urb *urb);
+static void mos7703_bulk_in_callback(struct urb *urb);
+static void mos7703_bulk_out_data_callback(struct urb *urb);
 
 /* function prototypes for the usbserial callbacks */
-static int mos7703_open(struct usb_serial_port *port, struct file *filp);
-static void mos7703_close(struct usb_serial_port *port, struct file *filp);
+static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port);
+static void mos7703_close(struct usb_serial_port *port);
 //static int  mos7703_write                     (struct usb_serial_port *port, int from_user, const unsigned char *buf, int count);
-static int mos7703_write(struct usb_serial_port *port, const unsigned char *buf,
-			 int count);
-static int mos7703_write_room(struct usb_serial_port *port);
-static int mos7703_chars_in_buffer(struct usb_serial_port *port);
-static void mos7703_throttle(struct usb_serial_port *port);
-static void mos7703_unthrottle(struct usb_serial_port *port);
-static void mos7703_set_termios(struct usb_serial_port *port,
-				struct termios *old_termios);
-static int mos7703_ioctl(struct usb_serial_port *port, struct file *file,
+static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
+			 const unsigned char *data, int count);
+static int mos7703_write_room(struct tty_struct *tty);
+static int mos7703_chars_in_buffer(struct tty_struct *tty);
+static void mos7703_throttle(struct tty_struct *tty);
+static void mos7703_unthrottle(struct tty_struct *tty);
+static void mos7703_set_termios(struct tty_struct *tty,
+				struct usb_serial_port *port,
+				struct ktermios *old_termios);
+static int mos7703_ioctl(struct tty_struct *tty,
 			 unsigned int cmd, unsigned long arg);
-static void mos7703_break(struct usb_serial_port *port, int break_state);
+static void mos7703_break(struct tty_struct *tty, int break_state);
 static int mos7703_startup(struct usb_serial *serial);
-static void mos7703_shutdown(struct usb_serial *serial);
 
 /* function prototypes for all of our local functions */
 static int SendMosCmd(struct usb_serial *serial, __u8 request, __u16 value,
@@ -406,7 +398,8 @@ static int SendMosCmd(struct usb_serial *serial, __u8 request, __u16 value,
 static int calc_baud_rate_divisor(int baud_rate, int *divisor);
 static int send_cmd_write_baud_rate(struct moschip_port *mos7703_port,
 				    int baudRate);
-static void change_port_settings(struct moschip_port *mos7703_port,
-				 struct termios *old_termios);
+static void change_port_settings(struct tty_struct *tty,
+				 struct moschip_port *mos7703_port,
+				 struct ktermios *old_termios);
 
 #endif
