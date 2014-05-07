@@ -102,9 +102,6 @@ static int port_paranoia_check(struct usb_serial_port *port,
 			       const char *function);
 #endif
 
-static struct usb_serial_driver mcs7703_1port_driver;
-
-
 /************************************************************************/
 /*            U S B  C A L L B A C K   F U N C T I O N S                */
 /************************************************************************/
@@ -1931,32 +1928,6 @@ static int mos7703_startup(struct usb_serial *serial)
 
 }
 
-static struct usb_serial_driver mcs7703_1port_driver = {
-	.driver = {
-		.owner = THIS_MODULE,
-		.name =	"moschip7703",
-	},
-	.description = "Moschip 7703 usb-serial",
-	.id_table = id_table,
-	.num_ports = 1,
-
-	.probe = mos77xx_probe,
-	.attach = mos7703_startup,
-
-	.open = mos7703_open,
-	.close = mos7703_close,
-	.write = mos7703_write,
-
-	.write_room = mos7703_write_room,
-	.ioctl = mos7703_ioctl,
-	.set_termios = mos7703_set_termios,
-	.break_ctl = mos7703_break,
-	.chars_in_buffer = mos7703_chars_in_buffer,
-	.throttle = mos7703_throttle,
-	.unthrottle = mos7703_unthrottle,
-	.read_bulk_callback = mos7703_bulk_in_callback,
-	.read_int_callback = mos7703_interrupt_callback
-};
 
 #ifdef xyz
 static struct usb_serial *get_usb_serial(struct usb_serial_port *port,
@@ -2015,8 +1986,41 @@ static int port_paranoia_check(struct usb_serial_port *port,
 
 #endif
 
+static struct usb_device_id id_table[] = {
+	{USB_DEVICE(USB_VENDOR_ID_MOSCHIP, MOSCHIP_DEVICE_ID_7703)},
+	{} /* terminating entry */
+};
+MODULE_DEVICE_TABLE(usb, id_table);
+
+static struct usb_serial_driver mcs7703_driver = {
+	.driver = {
+		.owner = THIS_MODULE,
+		.name =	"moschip7703",
+	},
+	.description = "Moschip 7703 usb-serial",
+	.id_table = id_table,
+	.num_ports = 1,
+
+	.probe = mos77xx_probe,
+	.attach = mos7703_startup,
+
+	.open = mos7703_open,
+	.close = mos7703_close,
+	.write = mos7703_write,
+
+	.write_room = mos7703_write_room,
+	.ioctl = mos7703_ioctl,
+	.set_termios = mos7703_set_termios,
+	.break_ctl = mos7703_break,
+	.chars_in_buffer = mos7703_chars_in_buffer,
+	.throttle = mos7703_throttle,
+	.unthrottle = mos7703_unthrottle,
+	.read_bulk_callback = mos7703_bulk_in_callback,
+	.read_int_callback = mos7703_interrupt_callback
+};
+
 static struct usb_serial_driver * const serial_drivers[] = {
-	&mcs7703_1port_driver, NULL
+	&mcs7703_driver, NULL
 };
 
 module_usb_serial_driver(serial_drivers, id_table);

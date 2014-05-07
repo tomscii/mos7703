@@ -43,12 +43,6 @@
 #if !defined(_MOS_CIP_H_)
 #define	_MOS_CIP_H_
 
-#define MAX_RS232_PORTS		2	/* Max # of RS-232 ports per device */
-
-/* 
- *  All typedef goes here
- */
-
 /* typedefs that the insideout headers need */
 
 #ifndef TRUE
@@ -60,7 +54,7 @@
 #endif
 
 #ifndef LOW8
-#define LOW8(val)		((unsigned char)(val & 0xff))
+#define LOW8(val)	((unsigned char)(val & 0xff))
 #endif
 
 #ifndef HIGH8
@@ -71,113 +65,16 @@
 #define NUM_ENTRIES(x)	(sizeof(x)/sizeof((x)[0]))
 #endif
 
-#ifndef __KERNEL__
-#define __KERNEL__
-#endif
-
-#define MAX_SERIALNUMBER_LEN 12
-
-/* The following table is used to map the USBx port number to 
- * the device serial number (or physical USB path), */
-#define MAX_MOSPORTS	2
-
-#define MAX_NAME_LEN		64
-
-//++higher baud
+#define MAX_NAME_LEN	64
 
 #define TIOCEXBAUD	0x5462	//IOCTL command to set higher baud rate
 
-#define BAUD_1152	0	//115200bps  * 1
-#define BAUD_2304	1	//230400bps  * 2
-#define BAUD_4032	2	//403200bps  * 3.5
-#define BAUD_4608	3	//460800bps  * 4
-#define BAUD_8064	4	//806400bps  * 7
-#define BAUD_9216	5	//921600bps  * 8
-
-//--higher baud
-
-#define CHASE_TIMEOUT		(5*HZ)	/* 5 seconds */
-#define OPEN_TIMEOUT		(5*HZ)	/* 5 seconds */
-#define COMMAND_TIMEOUT		(5*HZ)	/* 5 seconds */
-
-#ifndef SERIAL_MAGIC
-#define SERIAL_MAGIC	0x6702
-#endif
-
-#define PORT_MAGIC		0x7301
-
-#define MOSPORT_CONFIG_DEVICE "/proc/mos7703"
-
-/* /proc/mos7703 Interface
- * This interface uses read/write/lseek interface to talk to the moschip driver
- * the following read functions are supported: */
-#define PROC_GET_MAPPING_TO_PATH 		1
-#define PROC_GET_COM_ENTRY				2
-
-#define PROC_GET_EDGE_MANUF_DESCRIPTOR	3
-#define PROC_GET_BOOT_DESCRIPTOR		4
-#define PROC_GET_PRODUCT_INFO			5
-
-#define PROC_GET_STRINGS				6
-#define PROC_GET_CURRENT_COM_MAPPING	7
-
-/* The parameters to the lseek() for the read is: */
-#define PROC_READ_SETUP(Command, Argument)	((Command) + ((Argument)<<8))
-
-/* the following write functions are supported: */
-#define PROC_SET_COM_MAPPING 		1
-#define PROC_SET_COM_ENTRY			2
-
-/* vendor id and device id defines */
 #define USB_VENDOR_ID_MOSCHIP		0x9710
 #define MOSCHIP_DEVICE_ID_7703		0x7703
 
-/* 
- *  All structure defination goes here
- */
-
-/* Interrupt Rotinue Defines	*/
-
-#define SERIAL_IIR_RLS      0x06
-#define SERIAL_IIR_RDA      0x04
-#define SERIAL_IIR_CTI      0x0c
-#define SERIAL_IIR_THR      0x02
-#define SERIAL_IIR_MS       0x00
-/*
- *  Emulation of the bit mask on the LINE STATUS REGISTER.
- */
-#define SERIAL_LSR_DR       0x0001
-#define SERIAL_LSR_OE       0x0002
-#define SERIAL_LSR_PE       0x0004
-#define SERIAL_LSR_FE       0x0008
-#define SERIAL_LSR_BI       0x0010
-#define SERIAL_LSR_THRE     0x0020
-#define SERIAL_LSR_TEMT     0x0040
-#define SERIAL_LSR_FIFOERR  0x0080
-
-/*
- * URB POOL related defines
- */
 #define NUM_URBS                        32	/* URB Count */
 #define URB_TRANSFER_BUFFER_SIZE        32	/* URB Size  */
 
-struct comMapper {
-	char SerialNumber[MAX_SERIALNUMBER_LEN + 1];	/* Serial number/usb path */
-	int numPorts;		/* Number of ports */
-	int Original[MAX_RS232_PORTS];	/* Port numbers set by IOCTL */
-	int Port[MAX_RS232_PORTS];	/* Actual used port numbers */
-};
-
-/* 
- * The following sturcture is passed to the write 
- */
-struct procWrite {
-	int Command;
-	union {
-		struct comMapper Entry;
-		int ComMappingBasedOnUSBPort;	/* Boolean value */
-	} u;
-};
 
 /*
  *	Product information read from the Moschip. Provided for later upgrade
@@ -201,23 +98,6 @@ struct moschip_product_info {
 
 };
 
-static struct usb_device_id id_table[] = {
-	{USB_DEVICE(USB_VENDOR_ID_MOSCHIP, MOSCHIP_DEVICE_ID_7703)},
-	{} /* terminating entry */
-};
-MODULE_DEVICE_TABLE(usb, id_table);
-
-#if 0
-
-/* receive port state */
-enum RXSTATE {
-	EXPECT_HDR1 = 0,	/* Expect header byte 1 */
-	EXPECT_HDR2 = 1,	/* Expect header byte 2 */
-	EXPECT_DATA = 2,	/* Expect 'RxBytesRemaining' data */
-	EXPECT_HDR3 = 3,	/* Expect header byte 3 (for status hdrs only) */
-};
-
-#endif
 
 /* Transmit Fifo 
  * This Transmit queue is an extension of the moschip Rx buffer. 
@@ -296,7 +176,7 @@ struct moschip_port {
 	wait_queue_head_t wait_chase;	/* for handling sleeping while waiting for chase to finish */
 	wait_queue_head_t wait_open;	/* for handling sleeping while waiting for open to finish */
 	wait_queue_head_t wait_command;	/* for handling sleeping while waiting for command to finish */
-	wait_queue_head_t delta_msr_wait;	/* for handling sleeping while waiting for msr change to happen */
+	wait_queue_head_t delta_msr_wait; /* for handling sleeping while waiting for msr change to happen */
 	int delta_msr_cond;
 
 	struct async_icount icount;
