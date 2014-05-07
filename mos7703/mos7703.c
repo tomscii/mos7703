@@ -1541,9 +1541,6 @@ static int mos7703_ioctl(struct tty_struct *tty,
 			return -EFAULT;
 
 		return 0;
-
-	case TIOCEXBAUD:
-		return 0;
 	}
 
 	return -ENOIOCTLCMD;

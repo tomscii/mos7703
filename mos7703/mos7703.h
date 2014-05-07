@@ -67,8 +67,6 @@
 
 #define MAX_NAME_LEN	64
 
-#define TIOCEXBAUD	0x5462	//IOCTL command to set higher baud rate
-
 #define USB_VENDOR_ID_MOSCHIP		0x9710
 #define MOSCHIP_DEVICE_ID_7703		0x7703
 
