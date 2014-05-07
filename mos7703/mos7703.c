@@ -414,6 +414,7 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 		DPRINTK("%s", "Null port,Returning with ENODEV \n");
 		return -ENODEV;
 	}
+	mos7703_port->tty = tty;
 
 	port0 = serial->port[0];
 	mos7703_serial = usb_get_serial_port_data(port);
