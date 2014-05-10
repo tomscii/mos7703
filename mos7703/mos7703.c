@@ -1,48 +1,21 @@
 /*
+ * mos7703.c
+ *   Controls the Moschip 7703 usb to single port serial converter
+ *
+ * Copyright 2005 Moschip Semiconductor Tech. Ltd.
+ *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * the Free Software Foundation, version 2 of the License.
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Developed by:
+ *      Eshwar Danduri
+ *	Ravikanth G
+ *	Sandilya Bhagi
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Cleaned up from the original and ported to latest Linux kernel by:
+ *	Tom Szilagyi <tomszilagyi@gmail.com>
  */
-
-/*************************************************************************
- *
- * Project Name : MosChip 7703 Driver
- *
- * Module Name  : Mos7703
- *
- * File         : mos7703.c 
- *
- * File Revision: 1.0.0.0
- *
- * Revision Date:  20/06/05 
- *
- * Author       : Eshwar Danduri
- *
- * Purpose      : It gives an interface between USB to Serial and serves as a 
- *                Serial Driver for the high level layers /applications.
- *
- * LEGEND       :
- *
- *
- * DBG - Code inserted due to as part of debugging
- * DPRINTK - Debug Print statement
- *
- * Change History:
- *	Ported to Fedora Core 4/Kernel 2.6.11.1 : Ravikanth G
- *	Added Support from 2x baud to 8x baud on 19th Nov 2005 : Sandilya Bhagi
- *
- *************************************************************************/
-
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -76,9 +49,8 @@
 #define err(args...)
 #endif
 
-#define DRIVER_AUTHOR "Moschip Ltd."
+#define DRIVER_AUTHOR "Moschip Semiconductor Tech. Ltd."
 #define DRIVER_DESC "Moschip 7703 USB Serial Driver"
-#define DRIVER_VERSION "1.0.1"
 
 /*
  * Defines used for sending commands to port 
