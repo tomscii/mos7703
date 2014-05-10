@@ -1,30 +1,29 @@
-#########################################################
-#             Makefile for MOS7703   LINUX 2.6          #      
-#########################################################
+#
+# Makefile for mos7703
+#
 
-KDIR:=/lib/modules/$(shell uname -r)/build
+KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 
-EXTRA_CFLAGS += -I$(KDIR)/drivers/usb/serial
+ifneq ($(KERNELRELEASE),)
+# called from kernel build system:
 
+obj-m := mos7703.o
 
-obj-m:=mos7703.o
+else
 
-default:
-	$(MAKE) -C $(KDIR) $(EXTRA_CFLAGS) SUBDIRS=$(PWD) modules
+all:
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
+
 clean:
-	$(RM) *.mod.c *.o *.ko .*.cmd 
+	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
+
 load:
 	-modprobe usbserial
 	insmod mos7703.ko
+
 unload:
 	rmmod mos7703
 
-install:
-	sh mosinstall 
+.PHONY: all clean load unload
 
-uninstall:
-	sh mosuninstall
-
-
-
-
+endif
