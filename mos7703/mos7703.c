@@ -52,6 +52,15 @@
 #define DRIVER_AUTHOR "Moschip Semiconductor Tech. Ltd."
 #define DRIVER_DESC "Moschip 7703 USB Serial Driver"
 
+#define USB_VENDOR_ID_MOSCHIP		0x9710
+#define MOSCHIP_DEVICE_ID_7703		0x7703
+
+static struct usb_device_id id_table[] = {
+	{USB_DEVICE(USB_VENDOR_ID_MOSCHIP, MOSCHIP_DEVICE_ID_7703)},
+	{} /* terminating entry */
+};
+MODULE_DEVICE_TABLE(usb, id_table);
+
 /*
  * Defines used for sending commands to port 
  */
@@ -167,7 +176,7 @@ static void mos7703_bulk_in_callback(struct urb *urb)
 	struct moschip_serial *mos7703_serial;
 	struct moschip_port *mos7703_port;
 	struct tty_struct *tty;
-	int i;
+	//int i;
 
 	if (urb->status) {
 		DPRINTK("nonzero read bulk status received: %d\n", urb->status);
@@ -198,21 +207,9 @@ static void mos7703_bulk_in_callback(struct urb *urb)
 	if (urb->actual_length) {
 		tty = mos7703_port->tty;
 		if (tty) {
-			for (i = 0; i < urb->actual_length; ++i) {
-				/* if we insert more than TTY_FLIPBUF_SIZE characters,
-				   we drop them. */
-                                #if 0 // tom: no field tty->flip
-				if (tty->flip.count >= TTY_FLIPBUF_SIZE) {
-				#else
-				if (1) {
-				#endif
-					tty_flip_buffer_push(tty->port);
-				}
-				/* this doesn't actually push the data through unless
-				   tty->low_latency is set */
-				tty_insert_flip_char(tty->port, data[i], 0);
-				DPRINTK(" READ : %c \n", data[i]);
-			}
+			tty_insert_flip_string_fixed_flag(tty->port, data,
+							  TTY_NORMAL,
+							  urb->actual_length);
 			tty_flip_buffer_push(tty->port);
 		}
 	}
@@ -403,9 +400,7 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 			continue;
 		}
 
-		urb->transfer_buffer = NULL;
-		urb->transfer_buffer =
-		    kmalloc(URB_TRANSFER_BUFFER_SIZE, GFP_KERNEL);
+		urb->transfer_buffer = kmalloc(URB_TRANSFER_BUFFER_SIZE, GFP_KERNEL);
 		if (!urb->transfer_buffer) {
 			err(" **************** %s-out of memory for urb buffers.", __FUNCTION__);
 			continue;
@@ -475,14 +470,13 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	 * mos7703_startup as the structures were not set up at that time.)
 	 */
 
-/* force low_latency on so that our tty_push actually forces the data
-     * through,otherwise it is scheduled, and with high data rates (like with
-     *  OHCI) data can get lost.
-     */
-#if 0 // tom: no field low_latency
+        /* force low_latency on so that our tty_push actually forces
+	 * the data through, otherwise it is scheduled, and with high
+	 * data rates (like with OHCI) data can get lost.
+	 */
 	if (tty)
-		tty->low_latency = 1;
-#endif
+		tty->port->low_latency = 1;
+
 	DPRINTK("port number is %d \n", port->port_number);
 	DPRINTK("port bulk in endpoint is %x \n",
 		port->bulk_in_endpointAddress);
@@ -804,7 +798,6 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 
 	/* try to find a free urb in our list of them */
 	urb = NULL;
-
 	for (i = 0; i < NUM_URBS; ++i) {
 		if (mos7703_port->write_urb_pool[i]->status != -EINPROGRESS) {
 			urb = mos7703_port->write_urb_pool[i];
@@ -813,7 +806,7 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 	}
 
 	if (urb == NULL) {
-		dbg("%s - #################no more free urbs", __FUNCTION__);
+		dbg("%s - ################ no more free urbs\n", __FUNCTION__);
 		goto exit;
 	}
 
@@ -845,7 +838,7 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 		memcpy(urb->transfer_buffer, current_position, transfer_size);
 	}
 
-	DPRINTK("\n transfer_size:%d	transfer_buffer:%s\n", transfer_size,
+	DPRINTK("transfer_size:%d	transfer_buffer:%s\n", transfer_size,
 		(char *)urb->transfer_buffer);
 
 	/* fill up the urb with all of our data and submit it */
@@ -1953,12 +1946,6 @@ static int port_paranoia_check(struct usb_serial_port *port,
 }
 
 #endif
-
-static struct usb_device_id id_table[] = {
-	{USB_DEVICE(USB_VENDOR_ID_MOSCHIP, MOSCHIP_DEVICE_ID_7703)},
-	{} /* terminating entry */
-};
-MODULE_DEVICE_TABLE(usb, id_table);
 
 static struct usb_serial_driver mcs7703_driver = {
 	.driver = {

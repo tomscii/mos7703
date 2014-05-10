@@ -67,9 +67,6 @@
 
 #define MAX_NAME_LEN	64
 
-#define USB_VENDOR_ID_MOSCHIP		0x9710
-#define MOSCHIP_DEVICE_ID_7703		0x7703
-
 #define NUM_URBS                        32	/* URB Count */
 #define URB_TRANSFER_BUFFER_SIZE        32	/* URB Size  */
 
