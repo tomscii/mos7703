@@ -511,7 +511,7 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	if (tty)
 		tty->low_latency = 1;
 #endif
-	DPRINTK("port number is %d \n", port->number);
+	DPRINTK("port number is %d \n", port->port_number);
 	DPRINTK("port bulk in endpoint is %x \n",
 		port->bulk_in_endpointAddress);
 	DPRINTK("port bulk out endpoint is %x \n",
@@ -582,7 +582,7 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 		return -ENOMEM;
 	}
 	DPRINTK("%s(%d) - Initialize TX fifo to %d bytes", __FUNCTION__,
-		port->number, mos7703_port->maxTxCredits);
+		port->port_number, mos7703_port->maxTxCredits);
 
 	return 0;
 }
@@ -915,7 +915,7 @@ static void mos7703_throttle(struct tty_struct *tty)
 		return;
 	}
 #endif
-	DPRINTK("- port %d\n", port->number);
+	DPRINTK("- port %d\n", port->port_number);
 
 	mos7703_port = usb_get_serial_port_data(port);
 
@@ -1059,14 +1059,14 @@ static void mos7703_set_termios(struct tty_struct *tty,
 	}
 
 	dbg("%s - clfag %08x iflag %08x", __FUNCTION__,
-	    tty->termios->c_cflag, RELEVANT_IFLAG(tty->termios->c_iflag));
+	    tty->termios.c_cflag, RELEVANT_IFLAG(tty->termios.c_iflag));
 
 	if (old_termios) {
 		dbg("%s - old clfag %08x old iflag %08x", __FUNCTION__,
 		    old_termios->c_cflag, RELEVANT_IFLAG(old_termios->c_iflag));
 	}
 
-	dbg("%s - port %d", __FUNCTION__, port->number);
+	dbg("%s - port %d", __FUNCTION__, port->port_number);
 
 	/* change the port settings to the new ones specified */
 	change_port_settings(tty, mos7703_port, old_termios);
@@ -1454,7 +1454,7 @@ static int mos7703_ioctl(struct tty_struct *tty,
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL)
 		return -1;
-	dbg("%s - port %d, cmd = 0x%x", __FUNCTION__, port->number, cmd);
+	dbg("%s - port %d, cmd = 0x%x", __FUNCTION__, port->port_number, cmd);
 
 	switch (cmd) {
 		/* return number of bytes available */
@@ -1465,31 +1465,30 @@ static int mos7703_ioctl(struct tty_struct *tty,
 					      (unsigned int *)arg);
 #endif
 	case TIOCSERGETLSR:
-		dbg("%s (%d) TIOCSERGETLSR", __FUNCTION__, port->number);
+		dbg("%s (%d) TIOCSERGETLSR", __FUNCTION__, port->port_number);
 		return get_lsr_info(tty, mos7703_port, (unsigned int *)arg);
 
 	case TIOCMBIS:
 	case TIOCMBIC:
 	case TIOCMSET:
 		dbg("%s (%d) TIOCMSET/TIOCMBIC/TIOCMSET", __FUNCTION__,
-		    port->number);
+		    port->port_number);
 		return set_modem_info(mos7703_port, cmd, (unsigned int *)arg);
 
 	case TIOCMGET:
-		dbg("%s (%d) TIOCMGET", __FUNCTION__, port->number);
+		dbg("%s (%d) TIOCMGET", __FUNCTION__, port->port_number);
 		return get_modem_info(mos7703_port, (unsigned int *)arg);
 
 	case TIOCGSERIAL:
-		dbg("%s (%d) TIOCGSERIAL", __FUNCTION__, port->number);
-		return get_serial_info(mos7703_port,
-				       (struct serial_struct *)arg);
+		dbg("%s (%d) TIOCGSERIAL", __FUNCTION__, port->port_number);
+		return get_serial_info(mos7703_port, (struct serial_struct *)arg);
 
 	case TIOCSSERIAL:
-		dbg("%s (%d) TIOCSSERIAL", __FUNCTION__, port->number);
+		dbg("%s (%d) TIOCSSERIAL", __FUNCTION__, port->port_number);
 		break;
 
 	case TIOCMIWAIT:
-		dbg("%s (%d) TIOCMIWAIT", __FUNCTION__, port->number);
+		dbg("%s (%d) TIOCMIWAIT", __FUNCTION__, port->port_number);
 		cprev = mos7703_port->icount;
 
 		while (1) {
@@ -1535,7 +1534,7 @@ static int mos7703_ioctl(struct tty_struct *tty,
 		icount.buf_overrun = cnow.buf_overrun;
 
 		dbg("%s (%d) TIOCGICOUNT RX=%d, TX=%d", __FUNCTION__,
-		    port->number, icount.rx, icount.tx);
+		    port->port_number, icount.rx, icount.tx);
 
 		if (copy_to_user((void *)arg, &icount, sizeof(icount)))
 			return -EFAULT;
@@ -1579,7 +1578,7 @@ static int send_cmd_write_baud_rate(struct moschip_port *mos7703_port,
 	number = mos7703_port->port->port_number - mos7703_port->port->minor;
 
 	dbg("%s - port = %d, baud = %d", __FUNCTION__,
-	    mos7703_port->port->number, baudRate);
+	    mos7703_port->port->port_number, baudRate);
 	status = calc_baud_rate_divisor(baudRate, &divisor);
 	if (status) {
 		err("%s - bad baud rate", __FUNCTION__);
@@ -1701,7 +1700,7 @@ static void change_port_settings(struct tty_struct *tty,
 		return;
 	}
 #endif
-	dbg("%s - port %d", __FUNCTION__, mos7703_port->port->number);
+	dbg("%s - port %d", __FUNCTION__, mos7703_port->port->port_number);
 
 	if ((!mos7703_port->open) && (!mos7703_port->openPending)) {
 		dbg("%s - port not opened", __FUNCTION__);
