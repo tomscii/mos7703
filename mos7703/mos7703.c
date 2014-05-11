@@ -31,8 +31,6 @@
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
 
-#define xyz 1
-
 /* 1: Enables the debugging :: 0: Disable the debugging */
 #define ASP_DEBUG 0
 
@@ -86,7 +84,6 @@ struct moschip_port {
 
 	struct async_icount icount;
 	struct usb_serial_port *port; /* loop back to the owner of this object */
-	struct usb_serial *serial;    /* loop back to the owner of this object */
 	struct tty_struct *tty;
 	struct urb *write_urb_pool[NUM_URBS];
 };
@@ -166,15 +163,6 @@ static struct divisor_table_entry divisor_table[] = {
 #define MOS7703_MSR_RI		0x40	// Current state of RI
 #define MOS7703_MSR_CD		0x80	// Current state of CD
 
-
-#ifdef xyz
-static struct usb_serial *get_usb_serial(struct usb_serial_port *port,
-					 const char *function);
-static int serial_paranoia_check(struct usb_serial *serial,
-				 const char *function);
-static int port_paranoia_check(struct usb_serial_port *port,
-			       const char *function);
-#endif
 
 /************************************************************************/
 /*            U S B  C A L L B A C K   F U N C T I O N S                */
@@ -259,8 +247,6 @@ static void mos7703_bulk_in_callback(struct urb *urb)
 {
 	int status;
 	unsigned char *data;
-	struct usb_serial *serial;
-	struct usb_serial_port *port;
 	struct moschip_port *mos7703_port;
 	struct tty_struct *tty;
 
@@ -274,19 +260,7 @@ static void mos7703_bulk_in_callback(struct urb *urb)
 		DPRINTK("%s", "NULL mos7703_port pointer \n");
 		return;
 	}
-#ifdef xyz
-	port = (struct usb_serial_port *)mos7703_port->port;
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Port Paranoia failed \n");
-		return;
-	}
 
-	serial = get_usb_serial(port, __FUNCTION__);
-	if (!serial) {
-		DPRINTK("%s\n", "Bad serial pointer ");
-		return;
-	}
-#endif
 	data = urb->transfer_buffer;
 	if (urb->actual_length) {
 		tty = mos7703_port->tty;
@@ -304,7 +278,7 @@ static void mos7703_bulk_in_callback(struct urb *urb)
 	}
 
 	if (mos7703_port->read_urb->status != -EINPROGRESS) {
-		mos7703_port->read_urb->dev = serial->dev;
+		mos7703_port->read_urb->dev = mos7703_port->port->serial->dev;
 		status = usb_submit_urb(mos7703_port->read_urb, GFP_ATOMIC);
 		if (status) {
 			DPRINTK
@@ -337,12 +311,7 @@ static void mos7703_bulk_out_data_callback(struct urb *urb)
 		DPRINTK("%s", "NULL mos7703_port pointer \n");
 		return;
 	}
-#ifdef xyz
-	if (port_paranoia_check(mos7703_port->port, __FUNCTION__)) {
-		DPRINTK("%s", "Port Paranoia failed \n");
-		return;
-	}
-#endif
+
 	tty = mos7703_port->tty;
 	if (tty) {
 		/* let the tty driver wakeup if it has a special write_wakeup
@@ -378,12 +347,6 @@ static int SendMosCmd(struct usb_serial *serial, u8 request, u16 value,
 	u8 requesttype;
 	u16 size;
 	unsigned int Pipe;
-#ifdef xyz
-	if (serial_paranoia_check(serial, __FUNCTION__)) {
-		DPRINTK("%s", "Serial Paranoia failed \n");
-		return -1;
-	}
-#endif
 
 	size = 0x00;
 	timeout = MOS_WDR_TIMEOUT;
@@ -433,18 +396,6 @@ static int set_higher_rates(struct moschip_port *mos7703_port, int *value)
 
 	port = (struct usb_serial_port *)mos7703_port->port;
 
-#ifdef xyz
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return -1;
-	}
-
-	serial = (struct usb_serial *)port->serial;
-	if (serial_paranoia_check(serial, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid Serial \n");
-		return -1;
-	}
-#endif
 	arg = *value;
 
 	DPRINTK("%s", "Sending Setting Commands .......... \n");
@@ -496,25 +447,13 @@ static int set_high_rates(struct moschip_port *mos7703_port, int *value)
 	int arg;
 	unsigned char data, bypass_flag = 0;
 	struct usb_serial_port *port;
-	struct usb_serial *serial;
 	char wValue = 0;
 
 	if (mos7703_port == NULL)
 		return -1;
 
-#ifdef xyz
 	port = (struct usb_serial_port *)mos7703_port->port;
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return -1;
-	}
 
-	serial = (struct usb_serial *)port->serial;
-	if (serial_paranoia_check(serial, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid Serial \n");
-		return -1;
-	}
-#endif
 	arg = *value;
 
 	switch (arg) {
@@ -556,7 +495,7 @@ static int set_high_rates(struct moschip_port *mos7703_port, int *value)
 	data = 0x40;
 	SendMosCmd(port->serial, MOS_WRITE, MOS_VEN_REG, 0x02, &data);
 
-	usb_control_msg(serial->dev, usb_sndctrlpipe(serial->dev, 0),
+	usb_control_msg(port->serial->dev, usb_sndctrlpipe(port->serial->dev, 0),
 			0x0E, 0x40, wValue, 0x00, NULL, 0x00, 5 * HZ);
 
 	SendMosCmd(port->serial, MOS_READ, MOS_VEN_REG, 0x01, &data);
@@ -658,23 +597,9 @@ static int send_cmd_write_baud_rate(struct moschip_port *mos7703_port,
 	int status;
 	unsigned char data;
 	unsigned char number;
-	struct usb_serial_port *port;
 
 	if (mos7703_port == NULL)
 		return -1;
-
-#ifdef xyz
-	port = (struct usb_serial_port *)mos7703_port->port;
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return -1;
-	}
-
-	if (serial_paranoia_check(port->serial, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid Serial \n");
-		return -1;
-	}
-#endif
 
 	number = mos7703_port->port->port_number - mos7703_port->port->minor;
 
@@ -743,18 +668,7 @@ static void change_port_settings(struct tty_struct *tty,
 	if (mos7703_port == NULL)
 		return;
 
-#ifdef xyz
 	port = (struct usb_serial_port *)mos7703_port->port;
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return;
-	}
-
-	if (serial_paranoia_check(port->serial, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid Serial \n");
-		return;
-	}
-#endif
 	dbg("%s - port %d", __FUNCTION__, mos7703_port->port->port_number);
 
 	if ((!mos7703_port->open) && (!mos7703_port->openPending)) {
@@ -919,20 +833,7 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	struct moschip_port *mos7703_port;
 
 	DPRINTK("%s \n", __FUNCTION__);
-#ifdef xyz
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Port Paranoia failed,Returning with ENODEV \n");
-		return -ENODEV;
-	}
-#endif
 	serial = port->serial;
-#ifdef xyz
-	if (serial_paranoia_check(serial, __FUNCTION__)) {
-		DPRINTK("%s",
-			"Serial Paranoia failed,Returning with ENODEV \n");
-		return -ENODEV;
-	}
-#endif
 	mos7703_port = usb_get_serial_port_data(port);
 
 	if (mos7703_port == NULL) {
@@ -1084,23 +985,9 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
  *****************************************************************************/
 static void mos7703_close(struct usb_serial_port *port)
 {
-	struct usb_serial *serial;
 	struct moschip_port *mos7703_port;
 	int j;
 	char data;
-
-#ifdef xyz
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Port Paranoia failed \n");
-		return;
-	}
-
-	serial = get_usb_serial(port, __FUNCTION__);
-	if (!serial) {
-		DPRINTK("%s", "Serial Paranoia failed \n");
-		return;
-	}
-#endif
 
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL) {
@@ -1124,7 +1011,7 @@ static void mos7703_close(struct usb_serial_port *port)
 	/* While closing port shutdown all bulk read write and interrupt read if
 	   they exist */
 
-	if (serial->dev) {
+	if (mos7703_port->port->serial->dev) {
                 /* flush and block until tx is empty*/
 		if (mos7703_port->write_urb) {
 			DPRINTK("%s", "Shutdown bulk write\n");
@@ -1171,12 +1058,6 @@ static int mos7703_write_room(struct tty_struct *tty)
 	int room = 0;
 	struct moschip_port *mos7703_port;
 
-#ifdef xyz
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return -1;
-	}
-#endif
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL) {
 		DPRINTK("%s", "Null port,Returning with ENODEV \n");
@@ -1208,12 +1089,6 @@ static int mos7703_chars_in_buffer(struct tty_struct *tty)
 	int chars = 0;
 	struct moschip_port *mos7703_port;
 
-#ifdef xyz
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return -1;
-	}
-#endif
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL) {
 		DPRINTK("%s", "Null port,Returning with ENODEV \n");
@@ -1243,23 +1118,10 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 	int transfer_size;
 	int status;
 	struct moschip_port *mos7703_port;
-	struct usb_serial *serial;
 	struct urb *urb;
 	const unsigned char *current_position = data;
 	static long debugdata = 0;
 
-#ifdef xyz
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Port Paranoia failed \n");
-		return -1;
-	}
-
-	serial = port->serial;
-	if (serial_paranoia_check(serial, __FUNCTION__)) {
-		DPRINTK("%s", "Serial Paranoia failed \n");
-		return -1;
-	}
-#endif
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL) {
 		DPRINTK("%s", "mos7703_port is NULL\n");
@@ -1301,8 +1163,8 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 		(char *)urb->transfer_buffer);
 
 	/* fill up the urb with all of our data and submit it */
-	usb_fill_bulk_urb(urb, mos7703_port->serial->dev,
-			  usb_sndbulkpipe(mos7703_port->serial->dev,
+	usb_fill_bulk_urb(urb, mos7703_port->port->serial->dev,
+			  usb_sndbulkpipe(mos7703_port->port->serial->dev,
 					  port->bulk_out_endpointAddress),
 			  urb->transfer_buffer, transfer_size,
 			  mos7703_bulk_out_data_callback, mos7703_port);
@@ -1333,12 +1195,6 @@ static void mos7703_throttle(struct tty_struct *tty)
 	struct moschip_port *mos7703_port;
 	int status;
 
-#ifdef xyz
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return;
-	}
-#endif
 	DPRINTK("- port %d\n", port->port_number);
 
 	mos7703_port = usb_get_serial_port_data(port);
@@ -1389,12 +1245,6 @@ static void mos7703_unthrottle(struct tty_struct *tty)
 	struct moschip_port *mos7703_port = usb_get_serial_port_data(port);
 	int status;
 
-#ifdef xyz
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return;
-	}
-#endif
 	if (mos7703_port == NULL)
 		return;
 
@@ -1439,22 +1289,8 @@ static void mos7703_set_termios(struct tty_struct *tty,
 {
 	int status;
 	unsigned int cflag;
-	struct usb_serial *serial;
 	struct moschip_port *mos7703_port;
 
-#ifdef xyz
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return;
-	}
-
-	serial = port->serial;
-
-	if (serial_paranoia_check(serial, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid Serial \n");
-		return;
-	}
-#endif
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL)
 		return;
@@ -1497,7 +1333,7 @@ static void mos7703_set_termios(struct tty_struct *tty,
 
 	if (mos7703_port->read_urb->status != -EINPROGRESS) {
 
-		mos7703_port->read_urb->dev = serial->dev;
+		mos7703_port->read_urb->dev = mos7703_port->port->serial->dev;
 		status = usb_submit_urb(mos7703_port->read_urb, GFP_KERNEL);
 		if (status) {
 			DPRINTK
@@ -1545,13 +1381,7 @@ static int set_modem_info(struct moschip_port *mos7703_port, unsigned int cmd,
 	if (mos7703_port == NULL)
 		return -1;
 
-#ifdef xyz
 	port = (struct usb_serial_port *)mos7703_port->port;
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return -1;
-	}
-#endif
 	mcr = mos7703_port->shadowMCR;
 
 	if (copy_from_user(&arg, value, sizeof(int)))
@@ -1662,13 +1492,6 @@ static int mos7703_ioctl(struct tty_struct *tty,
 	struct async_icount cnow;
 	struct async_icount cprev;
 	struct serial_icounter_struct icount;
-
-#ifdef xyz
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return -1;
-	}
-#endif
 
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL)
@@ -1794,7 +1617,6 @@ static int mos7703_startup(struct usb_serial *serial)
 		    serial->port[0]->interrupt_in_endpointAddress;
 
 		mos7703_port->port = serial->port[i];
-		mos7703_port->serial = serial;
 		usb_set_serial_port_data(serial->port[i], mos7703_port);
 	}
 
@@ -1809,56 +1631,6 @@ static int mos7703_startup(struct usb_serial *serial)
 	return 0;
 
 }
-
-
-#ifdef xyz
-static struct usb_serial *get_usb_serial(struct usb_serial_port *port,
-					 const char *function)
-{
-	/* if no port was specified, or it fails a paranoia check */
-	if (!port ||
-	    port_paranoia_check(port, function) ||
-	    serial_paranoia_check(port->serial, function)) {
-		/* then say that we don't have a valid usb_serial thing, which will
-		 * end up genrating -ENODEV return values */
-		return NULL;
-	}
-
-	return port->serial;
-}
-
-/* Inline functions to check the sanity of a pointer that is passed to us */
-static int serial_paranoia_check(struct usb_serial *serial,
-				 const char *function)
-{
-	if (!serial) {
-		dbg("%s - serial == NULL", function);
-		return -1;
-	}
-	if (!serial->type) {
-		dbg("%s - serial->type == NULL!", function);
-		return -1;
-	}
-
-	return 0;
-}
-
-static int port_paranoia_check(struct usb_serial_port *port,
-			       const char *function)
-{
-	if (!port) {
-		dbg("%s - port == NULL", function);
-		return -1;
-	}
-	if (!port->serial) {
-		dbg("%s - port->serial == NULL", function);
-		return -1;
-	}
-
-	return 0;
-}
-
-#endif
 
 static struct usb_serial_driver mcs7703_driver = {
 	.driver = {
