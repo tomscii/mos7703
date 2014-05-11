@@ -1812,13 +1812,6 @@ static void change_port_settings(struct tty_struct *tty,
 	return;
 }
 
-// tom XXX is this needed?
-static int mos77xx_probe(struct usb_serial *serial,
-			 const struct usb_device_id *id)
-{
-	return 0;
-}
-
 /****************************************************************************
  * mos7703_startup
  ****************************************************************************/
@@ -1956,7 +1949,6 @@ static struct usb_serial_driver mcs7703_driver = {
 	.id_table = id_table,
 	.num_ports = 1,
 
-	.probe = mos77xx_probe,
 	.attach = mos7703_startup,
 
 	.open = mos7703_open,
