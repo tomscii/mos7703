@@ -44,6 +44,15 @@ function test_chardev {
 
 function set_serial {
     stty -F $1 115200 crtscts cs8
+    #stty -F $1 230400 crtscts cs8
+    #stty -F $1 460800 crtscts cs8
+    #stty -F $1 921600 crtscts cs8
+    #stty -F $1 1500000 crtscts cs8
+    #stty -F $1 3000000 crtscts cs8
+    #stty -F $1 6000000 crtscts cs8
+    if [ $? -ne 0 ] ; then
+	exit -1
+    fi
 }
 
 function get_file_size {
@@ -96,3 +105,10 @@ done
 
 compare_output $IN0 $OUT1
 compare_output $IN1 $OUT0
+
+# get rid of any leftover cat processes
+CPIDS=`ps --ppid=$$ | grep ca[t] | cut -d ' ' -f 1`
+for cpid in $CPIDS; do
+	dbg "killing cat (pid=$cpid)"
+	kill $cpid
+done
