@@ -944,10 +944,13 @@ static void mos7703_set_termios(struct tty_struct *tty,
 static int get_lsr_info(struct tty_struct *tty,
 		struct moschip_port *mos7703_port, unsigned int __user *value)
 {
-	unsigned int result = TIOCSER_TEMT;
+	unsigned int result = 0;
+	int count = mos7703_chars_in_buffer(tty);
+	if (count == 0) {
+		result = TIOCSER_TEMT;
+	}
 	if (copy_to_user(value, &result, sizeof(int)))
 		return -EFAULT;
-
 	return 0;
 }
 
