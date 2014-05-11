@@ -99,28 +99,9 @@ struct moschip_port {
 
 	struct async_icount icount;
 	struct usb_serial_port *port;	/* loop back to the owner of this object */
+	struct usb_serial *serial;	/* loop back to the owner of this object */
 	struct tty_struct *tty;
 	struct urb *write_urb_pool[NUM_URBS];
-};
-
-/* This structure holds all of the individual serial device information */
-struct moschip_serial {
-	char name[MAX_NAME_LEN + 1];	/* string name of this device */
-
-	__u8 interrupt_in_endpoint;	/* the interrupt endpoint handle */
-	unsigned char *interrupt_in_buffer;	/* the buffer we use for the interrupt endpoint */
-	struct urb *interrupt_read_urb;	/* our interrupt urb */
-
-	__u8 bulk_in_endpoint;	/* the bulk in endpoint handle */
-	unsigned char *bulk_in_buffer;	/* the buffer we use for the bulk in endpoint */
-	struct urb *read_urb;	/* our bulk read urb */
-
-	__u8 bulk_out_endpoint;	/* the bulk out endpoint handle */
-
-	__u8 rxPort;		/* the port that we are currently receiving data for */
-	__u8 rxStatusCode;	/* the receive status code */
-	__u8 rxStatusParam;	/* the receive status paramater */
-	struct usb_serial *serial;	/* loop back to the owner of this object */
 };
 
 /* baud rate information */

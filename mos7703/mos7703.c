@@ -127,7 +127,7 @@ static void mos7703_interrupt_callback(struct urb *urb)
 
 	mos7703_port = (struct moschip_port *)urb->context;
 	if (!mos7703_port) {
-		DPRINTK("%s", "NULL mos7703_serial pointer \n");
+		DPRINTK("%s", "NULL mos7703_port pointer \n");
 		return;
 	}
 
@@ -166,7 +166,6 @@ static void mos7703_bulk_in_callback(struct urb *urb)
 	unsigned char *data;
 	struct usb_serial *serial;
 	struct usb_serial_port *port;
-	struct moschip_serial *mos7703_serial;
 	struct moschip_port *mos7703_port;
 	struct tty_struct *tty;
 
@@ -194,8 +193,6 @@ static void mos7703_bulk_in_callback(struct urb *urb)
 	}
 #endif
 	data = urb->transfer_buffer;
-	mos7703_serial = (struct moschip_serial *)serial->private;
-
 	if (urb->actual_length) {
 		tty = mos7703_port->tty;
 		if (tty) {
@@ -342,7 +339,6 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	struct usb_serial_port *port0;
 	struct urb *urb;
 	struct ktermios *old_termios;
-	struct moschip_serial *mos7703_serial;
 	struct moschip_port *mos7703_port;
 
 	DPRINTK("%s \n", __FUNCTION__);
@@ -369,10 +365,8 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	mos7703_port->tty = tty;
 
 	port0 = serial->port[0];
-	mos7703_serial = usb_get_serial_port_data(port);
-
-	if (mos7703_serial == NULL || port0 == NULL) {
-		DPRINTK("%s", "Null Serial n Port0,Returning with ENODEV \n");
+	if (port0 == NULL) {
+		DPRINTK("%s", "Null Serial Port0, Returning with ENODEV \n");
 		return -ENODEV;
 	}
 
@@ -521,7 +515,6 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 static void mos7703_close(struct usb_serial_port *port)
 {
 	struct usb_serial *serial;
-	struct moschip_serial *mos7703_serial;
 	struct moschip_port *mos7703_port;
 	int j;
 	char data;
@@ -539,10 +532,8 @@ static void mos7703_close(struct usb_serial_port *port)
 	}
 #endif
 
-	mos7703_serial = usb_get_serial_data(serial);
 	mos7703_port = usb_get_serial_port_data(port);
-
-	if ((mos7703_serial == NULL) || (mos7703_port == NULL)) {
+	if (mos7703_port == NULL) {
 		return;
 	}
 
@@ -605,7 +596,6 @@ static void mos7703_break(struct tty_struct *tty, int break_state)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct usb_serial *serial;
-	struct moschip_serial *mos7703_serial;
 	struct moschip_port *mos7703_port;
 
 	DPRINTK("%s \n", "Entering ...........");
@@ -622,10 +612,8 @@ static void mos7703_break(struct tty_struct *tty, int break_state)
 		return;
 	}
 #endif
-	mos7703_serial = usb_get_serial_data(serial);
 	mos7703_port = usb_get_serial_port_data(port);
-
-	if ((mos7703_serial == NULL) || (mos7703_port == NULL)) {
+	if (mos7703_port == NULL) {
 		return;
 	}
 
@@ -722,7 +710,6 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 	int status;
 	struct moschip_port *mos7703_port;
 	struct usb_serial *serial;
-	struct moschip_serial *mos7703_serial;
 	struct urb *urb;
 	const unsigned char *current_position = data;
 	static long debugdata = 0;
@@ -742,12 +729,6 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL) {
 		DPRINTK("%s", "mos7703_port is NULL\n");
-		return -1;
-	}
-
-	mos7703_serial = usb_get_serial_data(serial);
-	if (mos7703_serial == NULL) {
-		DPRINTK("%s", "mos7703_serial is NULL \n");
 		return -1;
 	}
 
@@ -786,8 +767,8 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 		(char *)urb->transfer_buffer);
 
 	/* fill up the urb with all of our data and submit it */
-	usb_fill_bulk_urb(urb, mos7703_serial->serial->dev,
-			  usb_sndbulkpipe(mos7703_serial->serial->dev,
+	usb_fill_bulk_urb(urb, mos7703_port->serial->dev,
+			  usb_sndbulkpipe(mos7703_port->serial->dev,
 					  port->bulk_out_endpointAddress),
 			  urb->transfer_buffer, transfer_size,
 			  mos7703_bulk_out_data_callback, mos7703_port);
@@ -1726,7 +1707,6 @@ static void change_port_settings(struct tty_struct *tty,
  ****************************************************************************/
 static int mos7703_startup(struct usb_serial *serial)
 {
-	struct moschip_serial *mos7703_serial;
 	struct moschip_port *mos7703_port;
 	struct usb_device *dev;
 	int i;
@@ -1738,19 +1718,6 @@ static int mos7703_startup(struct usb_serial *serial)
 
 	dev = serial->dev;
 
-	/* create our private serial structure */
-	mos7703_serial = kmalloc(sizeof(struct moschip_serial), GFP_KERNEL);
-	if (mos7703_serial == NULL) {
-		err("%s - Out of memory", __FUNCTION__);
-		return -ENOMEM;
-	}
-
-	/* resetting the private structure field values to zero */
-	memset(mos7703_serial, 0, sizeof(struct moschip_serial));
-
-	mos7703_serial->serial = serial;
-	serial->private = mos7703_serial;
-
 	/* we set up the pointers to the endpoints in the mos7703_open function, 
 	 * as the structures aren't created yet. */
 
@@ -1758,25 +1725,22 @@ static int mos7703_startup(struct usb_serial *serial)
 	for (i = 0; i < serial->num_ports; ++i) {
 
 		mos7703_port = kmalloc(sizeof(struct moschip_port), GFP_KERNEL);
-
 		if (mos7703_port == NULL) {
 			usb_set_serial_data(serial, NULL);
-			kfree(mos7703_serial);
 			err("%s - Out of memory", __FUNCTION__);
 			return -ENOMEM;
 		}
-
 		memset(mos7703_port, 0, sizeof(struct moschip_port));
 
 		/* Initialize all port interrupt end point to port 0 int endpoint
-		 * Our device has only one interrupt end point comman to all port */
+		 * Our device has only one interrupt end point common to all ports */
 
 		serial->port[i]->interrupt_in_endpointAddress =
 		    serial->port[0]->interrupt_in_endpointAddress;
 
 		mos7703_port->port = serial->port[i];
+		mos7703_port->serial = serial;
 		usb_set_serial_port_data(serial->port[i], mos7703_port);
-
 	}
 
 	/* Set Driver Done Bit */
