@@ -83,10 +83,6 @@ struct moschip_port {
 	__u8 shadowLCR;		/* last LCR value received */
 	__u8 shadowMCR;		/* last MCR value received */
 	__u8 shadowMSR;		/* last MSR value received */
-	__u8 shadowLSR;		/* last LSR value received */
-	__u8 shadowXonChar;	/* last value set as XON char in moschip */
-	__u8 shadowXoffChar;	/* last value set as XOFF char in moschip */
-
 	__u32 baudRate;
 
 	char open;
