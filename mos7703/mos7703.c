@@ -31,7 +31,6 @@
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
 
-#include "16C50.h"
 #define xyz 1
 
 /* 1: Enables the debugging :: 0: Disable the debugging */
@@ -130,6 +129,43 @@ static struct divisor_table_entry divisor_table[] = {
 
 #define MOS_WRITE       0x0E
 #define MOS_READ        0x0D
+
+/* UART register constants */
+
+#define IER			1	// ! Interrupt Enable Register
+#define FCR			2	// ! Fifo Control Register (Write)
+#define LCR			3	// Line Control Register
+#define MCR			4	// Modem Control Register
+
+#define LCR_BITS_5		0x00	// 5 bits/char
+#define LCR_BITS_6		0x01	// 6 bits/char
+#define LCR_BITS_7		0x02	// 7 bits/char
+#define LCR_BITS_8		0x03	// 8 bits/char
+#define LCR_BITS_MASK		0x03	// Mask for bits/char field
+
+#define LCR_STOP_1		0x00	// 1 stop bit
+                                        // 1.5 stop bits (if 5   bits/char)
+#define LCR_STOP_2		0x04	// 2 stop bits   (if 6-8 bits/char)
+#define LCR_STOP_MASK		0x04	// Mask for stop bits field
+
+#define LCR_PAR_NONE		0x00	// No parity
+#define LCR_PAR_ODD		0x08	// Odd parity
+#define LCR_PAR_EVEN		0x18	// Even parity
+#define LCR_PAR_MASK		0x38	// Mask for parity field
+
+#define LCR_DL_ENABLE		0x80	// Enable access to divisor latch
+
+#define MCR_DTR			0x01	// Assert DTR
+#define MCR_RTS			0x02	// Assert RTS
+#define MCR_MASTER_IE		0x08	// Enable interrupt outputs
+#define MCR_LOOPBACK		0x10	// Set internal (digital) loopback mode
+#define MCR_XON_ANY		0x20	// Enable any char to exit XOFF mode
+
+#define MOS7703_MSR_CTS		0x10	// Current state of CTS
+#define MOS7703_MSR_DSR		0x20	// Current state of DSR
+#define MOS7703_MSR_RI		0x40	// Current state of RI
+#define MOS7703_MSR_CD		0x80	// Current state of CD
+
 
 #ifdef xyz
 static struct usb_serial *get_usb_serial(struct usb_serial_port *port,
