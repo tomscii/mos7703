@@ -31,7 +31,6 @@
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
 
-#include "mos7703.h"
 #include "16C50.h"
 #define xyz 1
 
@@ -60,6 +59,66 @@ static struct usb_device_id id_table[] = {
 	{} /* terminating entry */
 };
 MODULE_DEVICE_TABLE(usb, id_table);
+
+
+#ifndef NUM_ENTRIES
+#define NUM_ENTRIES(x)	(sizeof(x)/sizeof((x)[0]))
+#endif
+
+#define NUM_URBS                        32	/* URB Count */
+#define URB_TRANSFER_BUFFER_SIZE        32	/* URB Size  */
+
+/* This structure holds all of the local port information */
+struct moschip_port {
+	struct urb *write_urb;	/* write URB for this port */
+	struct urb *read_urb;	/* read URB for this port */
+
+	u8 shadowLCR;		/* last LCR value received */
+	u8 shadowMCR;		/* last MCR value received */
+	u8 shadowMSR;		/* last MSR value received */
+
+	char open;
+	char openPending;
+	char closePending;
+
+        /* for handling sleeping while waiting for msr change to happen */
+	wait_queue_head_t delta_msr_wait;
+	int delta_msr_cond;
+
+	struct async_icount icount;
+	struct usb_serial_port *port; /* loop back to the owner of this object */
+	struct usb_serial *serial;    /* loop back to the owner of this object */
+	struct tty_struct *tty;
+	struct urb *write_urb_pool[NUM_URBS];
+};
+
+struct divisor_table_entry {
+	u32 BaudRate;
+	u16 Divisor;
+};
+
+/* Define table of divisors for Rev A moschip 7703 hardware
+ * These assume a 3.6864MHz crystal, the standard /16, and
+ * MCR.7 = 0.
+ */
+static struct divisor_table_entry divisor_table[] = {
+	{50, 2304},
+	{110, 1047}, /* 2094.545455 => 230450   => .0217 % over */
+	{134, 857},  /* 1713.011152 => 230398.5 => .00065% under */
+	{150, 768},
+	{300, 384},
+	{600, 192},
+	{1200, 96},
+	{1800, 64},
+	{2400, 48},
+	{4800, 24},
+	{7200, 16},
+	{9600, 12},
+	{19200, 6},
+	{38400, 3},
+	{57600, 2},
+	{115200, 1},
+};
 
 /* Defines used for sending commands to port */
 
@@ -323,6 +382,488 @@ static int SendMosCmd(struct usb_serial *serial, u8 request, u16 value,
 /************************************************************************/
 /*       D R I V E R  T T Y  I N T E R F A C E  F U N C T I O N S       */
 /************************************************************************/
+
+#if 0 // this is unused, but may be useful to compare w/ set_high_rates() below
+static int set_higher_rates(struct moschip_port *mos7703_port, int *value)
+{
+	unsigned int arg;
+	unsigned char data;
+
+	struct usb_serial_port *port;
+	struct usb_serial *serial;
+
+	if (mos7703_port == NULL)
+		return -1;
+
+	port = (struct usb_serial_port *)mos7703_port->port;
+
+#ifdef xyz
+	if (port_paranoia_check(port, __FUNCTION__)) {
+		DPRINTK("%s", "Invalid port \n");
+		return -1;
+	}
+
+	serial = (struct usb_serial *)port->serial;
+	if (serial_paranoia_check(serial, __FUNCTION__)) {
+		DPRINTK("%s", "Invalid Serial \n");
+		return -1;
+	}
+#endif
+	arg = *value;
+
+	DPRINTK("%s", "Sending Setting Commands .......... \n");
+
+	data = 0x00;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x01, &data);
+
+	data = 0x00;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x02, &data);
+
+	data = 0xCF;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x02, &data);
+
+	data = 0x0b;
+	mos7703_port->shadowMCR = data;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
+
+	data = 0x0b;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
+
+	data = 0x2b;
+	mos7703_port->shadowMCR = data;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
+	data = 0x2b;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
+
+	/*
+	 * SET BAUD DLL/DLM
+	 */
+
+	data = mos7703_port->shadowLCR | LCR_DL_ENABLE;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
+
+	data = 0x001;		/*DLL */
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x00, &data);
+
+	data = 0x000;		/*DLM */
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x01, &data);
+
+	data = mos7703_port->shadowLCR & ~LCR_DL_ENABLE;
+	DPRINTK("%s--%x", "value to be written to LCR", data);
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
+	return 0;
+}
+#endif
+
+static int set_high_rates(struct moschip_port *mos7703_port, int *value)
+{
+	int arg;
+	unsigned char data, bypass_flag = 0;
+	struct usb_serial_port *port;
+	struct usb_serial *serial;
+	char wValue = 0;
+
+	if (mos7703_port == NULL)
+		return -1;
+
+#ifdef xyz
+	port = (struct usb_serial_port *)mos7703_port->port;
+	if (port_paranoia_check(port, __FUNCTION__)) {
+		DPRINTK("%s", "Invalid port \n");
+		return -1;
+	}
+
+	serial = (struct usb_serial *)port->serial;
+	if (serial_paranoia_check(serial, __FUNCTION__)) {
+		DPRINTK("%s", "Invalid Serial \n");
+		return -1;
+	}
+#endif
+	arg = *value;
+
+	switch (arg) {
+	case 115200:
+		wValue = 0x00;
+		break;
+	case 230400:
+		wValue = 0x10;
+		break;
+	case 403200:
+		wValue = 0x20;
+		break;
+	case 460800:
+		wValue = 0x30;
+		break;
+	case 806400:
+		wValue = 0x40;
+		break;
+	case 921600:
+		wValue = 0x50;
+		break;
+	case 1500000:
+		wValue = 0x62;
+		break;
+	case 3000000:
+		wValue = 0x70;
+		break;
+	case 6000000:
+		bypass_flag = 1;	// To Enable bypass Clock 96 MHz Clock
+		break;
+	default:
+		return -1;
+
+	}
+
+	/* HIGHER BAUD HERE */
+
+        /* Clock multi register setting for above 1x baudrate */
+	data = 0x40;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_VEN_REG, 0x02, &data);
+
+	usb_control_msg(serial->dev, usb_sndctrlpipe(serial->dev, 0),
+			0x0E, 0x40, wValue, 0x00, NULL, 0x00, 5 * HZ);
+
+	SendMosCmd(port->serial, MOS_READ, MOS_VEN_REG, 0x01, &data);
+	data |= 0x01;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_VEN_REG, 0x01, &data);
+
+	if (bypass_flag) {
+		/* If true, will write 0x02 in the control register to
+		   enable the 96MHz Clock. This should be done only for 6 Mbps.
+		*/
+		SendMosCmd(port->serial, MOS_READ, MOS_VEN_REG, 0x01, &data);
+		data |= 0x02;
+		SendMosCmd(port->serial, MOS_WRITE, MOS_VEN_REG, 0x01, &data);
+	}
+
+	/* DCR0 register */
+	SendMosCmd(port->serial, MOS_READ, MOS_VEN_REG, 0x04, &data);
+	data |= 0x20;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_VEN_REG, 0x04, &data);
+
+	data = 0x2b;
+	mos7703_port->shadowMCR = data;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
+	data = 0x2b;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
+
+	/* SET BAUD DLL/DLM */
+	data = mos7703_port->shadowLCR | LCR_DL_ENABLE;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
+
+	data = 0x01;		/* DLL */
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x00, &data);
+
+	data = 0x00;		/* DLM */
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x01, &data);
+
+	data = mos7703_port->shadowLCR & ~LCR_DL_ENABLE;
+	DPRINTK("%s--%x", "value to be written to LCR", data);
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
+
+	return 0;
+}
+
+/*****************************************************************************
+ * calc_baud_rate_divisor
+ * this function calculates the proper baud rate divisor for the specified
+ * baud rate.
+ *****************************************************************************/
+static int calc_baud_rate_divisor(int baudrate, int *divisor)
+{
+	int i;
+	u16 custom;
+	u16 round1;
+	u16 round;
+
+	dbg("%s - %d", __FUNCTION__, baudrate);
+
+	for (i = 0; i < NUM_ENTRIES(divisor_table); i++) {
+		if (divisor_table[i].BaudRate == baudrate) {
+			*divisor = divisor_table[i].Divisor;
+			return 0;
+		}
+	}
+
+	/* We have tried all of the standard baud rates;
+	 * let's try to calculate the divisor for this baud rate.
+	 * Make sure the baud rate is reasonable.
+	 */
+	if (baudrate > 75 && baudrate < 230400) {
+		/* get divisor */
+		custom = (u16) (230400L / baudrate);
+
+		/* Check for round off */
+		round1 = (u16) (2304000L / baudrate);
+		round = (u16) (round1 - (custom * 10));
+		if (round > 4) {
+			custom++;
+		}
+
+		*divisor = custom;
+
+		DPRINTK(" Baud %d = %d\n", baudrate, custom);
+		return 0;
+	}
+
+	DPRINTK("%s\n", " Baud calculation Failed...");
+	return -1;
+}
+
+/*****************************************************************************
+ * send_cmd_write_baud_rate
+ * this function sends the proper command to change the baud rate of the
+ * specified port.
+ *****************************************************************************/
+static int send_cmd_write_baud_rate(struct moschip_port *mos7703_port,
+				    int baudRate)
+{
+	int divisor;
+	int status;
+	unsigned char data;
+	unsigned char number;
+	struct usb_serial_port *port;
+
+	if (mos7703_port == NULL)
+		return -1;
+
+#ifdef xyz
+	port = (struct usb_serial_port *)mos7703_port->port;
+	if (port_paranoia_check(port, __FUNCTION__)) {
+		DPRINTK("%s", "Invalid port \n");
+		return -1;
+	}
+
+	if (serial_paranoia_check(port->serial, __FUNCTION__)) {
+		DPRINTK("%s", "Invalid Serial \n");
+		return -1;
+	}
+#endif
+
+	number = mos7703_port->port->port_number - mos7703_port->port->minor;
+
+	dbg("%s - port = %d, baud = %d", __FUNCTION__,
+	    mos7703_port->port->port_number, baudRate);
+	status = calc_baud_rate_divisor(baudRate, &divisor);
+	if (status) {
+		err("%s - bad baud rate", __FUNCTION__);
+		DPRINTK("%s\n", "bad baud rate");
+		return status;
+	}
+
+	/* Enable access to divisor latch */
+	data = LCR_DL_ENABLE;
+	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
+		   MOS_UART_REG, LCR, &data);
+
+	DPRINTK("%s\n", "DLL/DLM enabled...");
+
+	/* Write the divisor itself */
+	data = divisor & 0xff; /* LOW byte */
+	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
+		   MOS_UART_REG, 0x00, &data);
+
+	DPRINTK("%s--value to DLL :%x\n", "DLL updated...", data);
+
+	data = (divisor & 0xff00) >> 8; /* HIGH byte */
+	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
+		   MOS_UART_REG, 0x01, &data);
+
+	DPRINTK("%s--value to DLM :%x\n", "DLM updated...", data);
+
+	/* Restore original value to disable access to divisor latch */
+	data = mos7703_port->shadowLCR;
+	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
+		   MOS_UART_REG, 0x03, &data);
+
+	DPRINTK("%s\n", "LCR Restored...");
+
+	DPRINTK("%s\n", "Leaving FUNC <send_cmd_write_baud_rate>");
+
+	return status;
+}
+
+/*****************************************************************************
+ * change_port_settings
+ * This routine is called to set the UART on the device to match 
+ * the specified new settings.
+ *****************************************************************************/
+static void change_port_settings(struct tty_struct *tty,
+				 struct moschip_port *mos7703_port,
+				 struct ktermios *old_termios)
+{
+	int baud;
+	unsigned cflag;
+	unsigned iflag;
+	u8 mask = 0xff;
+	u8 lData;
+	u8 lParity;
+	u8 lStop;
+	int status;
+	char data;
+
+	struct usb_serial_port *port;
+
+	if (mos7703_port == NULL)
+		return;
+
+#ifdef xyz
+	port = (struct usb_serial_port *)mos7703_port->port;
+	if (port_paranoia_check(port, __FUNCTION__)) {
+		DPRINTK("%s", "Invalid port \n");
+		return;
+	}
+
+	if (serial_paranoia_check(port->serial, __FUNCTION__)) {
+		DPRINTK("%s", "Invalid Serial \n");
+		return;
+	}
+#endif
+	dbg("%s - port %d", __FUNCTION__, mos7703_port->port->port_number);
+
+	if ((!mos7703_port->open) && (!mos7703_port->openPending)) {
+		dbg("%s - port not opened", __FUNCTION__);
+		return;
+	}
+
+	if (!tty) {
+		dbg("%s - no tty structure", __FUNCTION__);
+		return;
+	}
+
+	lData = LCR_BITS_8;
+	lStop = LCR_STOP_1;
+	lParity = LCR_PAR_NONE;
+
+	/* Change the data length */
+	cflag = tty->termios.c_cflag;
+	iflag = tty->termios.c_iflag;
+
+	switch (cflag & CSIZE) {
+	case CS5:
+		lData = LCR_BITS_5;
+		mask = 0x1f;
+		DPRINTK("%s\n", " data bits = 5");
+		break;
+
+	case CS6:
+		lData = LCR_BITS_6;
+		mask = 0x3f;
+		DPRINTK("%s\n", " data bits = 6");
+		break;
+
+	case CS7:
+		lData = LCR_BITS_7;
+		mask = 0x7f;
+		dbg("%s - data bits = 7", __FUNCTION__);
+		DPRINTK("%s\n", " data bits = 7");
+		break;
+
+	default:
+	case CS8:
+		lData = LCR_BITS_8;
+		dbg("%s - data bits = 8", __FUNCTION__);
+		DPRINTK("%s\n", " data bits = 8");
+		break;
+	}
+
+	/* Change the Parity bit */
+	if (cflag & PARENB) {
+		if (cflag & PARODD) {
+			lParity = LCR_PAR_ODD;
+			dbg("%s - parity = odd", __FUNCTION__);
+			DPRINTK("%s\n", " parity = odd");
+		} else {
+			lParity = LCR_PAR_EVEN;
+			dbg("%s - parity = even", __FUNCTION__);
+			DPRINTK("%s\n", " parity = even");
+		}
+	} else {
+		dbg("%s - parity = none", __FUNCTION__);
+		DPRINTK("%s\n", " parity = none");
+	}
+
+	/* Change the Stop bit */
+	if (cflag & CSTOPB) {
+		lStop = LCR_STOP_2;
+		dbg("%s - stop bits = 2", __FUNCTION__);
+		DPRINTK("%s\n", " stop bits = 2");
+	} else {
+		lStop = LCR_STOP_1;
+		dbg("%s - stop bits = 1", __FUNCTION__);
+		DPRINTK("%s\n", " stop bits = 1");
+	}
+
+	if (cflag & CMSPAR) {
+		lParity = lParity | 0x20;
+	}
+
+	/* update the LCR with the correct LCR value */
+	mos7703_port->shadowLCR &=
+	    ~(LCR_BITS_MASK | LCR_STOP_MASK | LCR_PAR_MASK);
+	mos7703_port->shadowLCR |= (lData | lParity | lStop);
+
+        /* Disable Interrupts */
+	data = 0x00;
+	SendMosCmd(mos7703_port->port->serial, MOS_WRITE, MOS_UART_REG, IER,
+		   &data);
+	data = 0x00;
+	SendMosCmd(mos7703_port->port->serial, MOS_WRITE, MOS_UART_REG, FCR,
+		   &data);
+	data = 0xcf;
+	SendMosCmd(mos7703_port->port->serial, MOS_WRITE, MOS_UART_REG, FCR,
+		   &data);
+
+        /* Send the updated LCR value to the mos7703 */
+	data = mos7703_port->shadowLCR;
+	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
+		   MOS_UART_REG, LCR, &data);
+
+	data = 0x00b;
+	mos7703_port->shadowMCR = data;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
+	data = 0x00b;
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
+
+	/* set up the MCR register and send it to the mos7703 */
+	mos7703_port->shadowMCR = MCR_MASTER_IE;
+	if (cflag & CBAUD) {
+		mos7703_port->shadowMCR |= (MCR_DTR | MCR_RTS);
+	}
+
+	if (cflag & CRTSCTS) {
+		mos7703_port->shadowMCR |= (MCR_XON_ANY);
+	} else {
+		mos7703_port->shadowMCR &= ~(MCR_XON_ANY);
+	}
+
+	data = mos7703_port->shadowMCR;
+	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
+		   MOS_UART_REG, MCR, &data);
+
+	/* Determine divisor based on baud rate */
+	baud = tty_get_baud_rate(tty);
+	DPRINTK("%s-- baud = %d\n", "Back from <tty_get_baud_rate>...", baud);
+
+	if (baud > 115200) {
+		set_high_rates(mos7703_port, &baud);
+		/* Enable Interrupts */
+		data = 0x0c;
+		SendMosCmd(mos7703_port->port->serial, MOS_WRITE, MOS_UART_REG,
+			   IER, &data);
+		return;
+	}
+	if (!baud) {
+		DPRINTK("%s\n", "Picked default baud...");
+		baud = 9600;
+	}
+
+	dbg("%s - baud rate = %d", __FUNCTION__, baud);
+	status = send_cmd_write_baud_rate(mos7703_port, baud);
+	wake_up(&mos7703_port->delta_msr_wait);
+	mos7703_port->delta_msr_cond = 1;
+	return;
+}
 
 /*****************************************************************************
  * SerialOpen
@@ -955,187 +1496,6 @@ static int get_lsr_info(struct tty_struct *tty,
 	return 0;
 }
 
-#if 0 // this is unused, but may be useful to compare w/ set_high_rates() below
-static int set_higher_rates(struct moschip_port *mos7703_port, int *value)
-{
-	unsigned int arg;
-	unsigned char data;
-
-	struct usb_serial_port *port;
-	struct usb_serial *serial;
-
-	if (mos7703_port == NULL)
-		return -1;
-
-	port = (struct usb_serial_port *)mos7703_port->port;
-
-#ifdef xyz
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return -1;
-	}
-
-	serial = (struct usb_serial *)port->serial;
-	if (serial_paranoia_check(serial, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid Serial \n");
-		return -1;
-	}
-#endif
-	arg = *value;
-
-	DPRINTK("%s", "Sending Setting Commands .......... \n");
-
-	data = 0x00;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x01, &data);
-
-	data = 0x00;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x02, &data);
-
-	data = 0xCF;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x02, &data);
-
-	data = 0x0b;
-	mos7703_port->shadowMCR = data;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
-
-	data = 0x0b;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
-
-	data = 0x2b;
-	mos7703_port->shadowMCR = data;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
-	data = 0x2b;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
-
-	/*
-	 * SET BAUD DLL/DLM
-	 */
-
-	data = mos7703_port->shadowLCR | LCR_DL_ENABLE;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
-
-	data = 0x001;		/*DLL */
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x00, &data);
-
-	data = 0x000;		/*DLM */
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x01, &data);
-
-	data = mos7703_port->shadowLCR & ~LCR_DL_ENABLE;
-	DPRINTK("%s--%x", "value to be written to LCR", data);
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
-	return 0;
-}
-#endif
-
-static int set_high_rates(struct moschip_port *mos7703_port, int *value)
-{
-	int arg;
-	unsigned char data, bypass_flag = 0;
-	struct usb_serial_port *port;
-	struct usb_serial *serial;
-	char wValue = 0;
-
-	if (mos7703_port == NULL)
-		return -1;
-
-#ifdef xyz
-	port = (struct usb_serial_port *)mos7703_port->port;
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return -1;
-	}
-
-	serial = (struct usb_serial *)port->serial;
-	if (serial_paranoia_check(serial, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid Serial \n");
-		return -1;
-	}
-#endif
-	arg = *value;
-
-	switch (arg) {
-	case 115200:
-		wValue = 0x00;
-		break;
-	case 230400:
-		wValue = 0x10;
-		break;
-	case 403200:
-		wValue = 0x20;
-		break;
-	case 460800:
-		wValue = 0x30;
-		break;
-	case 806400:
-		wValue = 0x40;
-		break;
-	case 921600:
-		wValue = 0x50;
-		break;
-	case 1500000:
-		wValue = 0x62;
-		break;
-	case 3000000:
-		wValue = 0x70;
-		break;
-	case 6000000:
-		bypass_flag = 1;	// To Enable bypass Clock 96 MHz Clock
-		break;
-	default:
-		return -1;
-
-	}
-
-	/* HIGHER BAUD HERE */
-
-        /* Clock multi register setting for above 1x baudrate */
-	data = 0x40;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_VEN_REG, 0x02, &data);
-
-	usb_control_msg(serial->dev, usb_sndctrlpipe(serial->dev, 0),
-			0x0E, 0x40, wValue, 0x00, NULL, 0x00, 5 * HZ);
-
-	SendMosCmd(port->serial, MOS_READ, MOS_VEN_REG, 0x01, &data);
-	data |= 0x01;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_VEN_REG, 0x01, &data);
-
-	if (bypass_flag) {
-		/* If true, will write 0x02 in the control register to
-		   enable the 96MHz Clock. This should be done only for 6 Mbps.
-		*/
-		SendMosCmd(port->serial, MOS_READ, MOS_VEN_REG, 0x01, &data);
-		data |= 0x02;
-		SendMosCmd(port->serial, MOS_WRITE, MOS_VEN_REG, 0x01, &data);
-	}
-
-	/* DCR0 register */
-	SendMosCmd(port->serial, MOS_READ, MOS_VEN_REG, 0x04, &data);
-	data |= 0x20;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_VEN_REG, 0x04, &data);
-
-	data = 0x2b;
-	mos7703_port->shadowMCR = data;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
-	data = 0x2b;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
-
-	/* SET BAUD DLL/DLM */
-	data = mos7703_port->shadowLCR | LCR_DL_ENABLE;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
-
-	data = 0x01;		/* DLL */
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x00, &data);
-
-	data = 0x00;		/* DLM */
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x01, &data);
-
-	data = mos7703_port->shadowLCR & ~LCR_DL_ENABLE;
-	DPRINTK("%s--%x", "value to be written to LCR", data);
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
-
-	return 0;
-}
-
 static int set_modem_info(struct moschip_port *mos7703_port, unsigned int cmd,
 			  unsigned int *value)
 {
@@ -1359,307 +1719,6 @@ static int mos7703_ioctl(struct tty_struct *tty,
 	}
 
 	return -ENOIOCTLCMD;
-}
-
-/*****************************************************************************
- * send_cmd_write_baud_rate
- * this function sends the proper command to change the baud rate of the
- * specified port.
- *****************************************************************************/
-static int send_cmd_write_baud_rate(struct moschip_port *mos7703_port,
-				    int baudRate)
-{
-	int divisor;
-	int status;
-	unsigned char data;
-	unsigned char number;
-	struct usb_serial_port *port;
-
-	if (mos7703_port == NULL)
-		return -1;
-
-#ifdef xyz
-	port = (struct usb_serial_port *)mos7703_port->port;
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return -1;
-	}
-
-	if (serial_paranoia_check(port->serial, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid Serial \n");
-		return -1;
-	}
-#endif
-
-	number = mos7703_port->port->port_number - mos7703_port->port->minor;
-
-	dbg("%s - port = %d, baud = %d", __FUNCTION__,
-	    mos7703_port->port->port_number, baudRate);
-	status = calc_baud_rate_divisor(baudRate, &divisor);
-	if (status) {
-		err("%s - bad baud rate", __FUNCTION__);
-		DPRINTK("%s\n", "bad baud rate");
-		return status;
-	}
-
-	/* Enable access to divisor latch */
-	data = LCR_DL_ENABLE;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
-		   MOS_UART_REG, LCR, &data);
-
-	DPRINTK("%s\n", "DLL/DLM enabled...");
-
-	/* Write the divisor itself */
-	data = divisor & 0xff; /* LOW byte */
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
-		   MOS_UART_REG, 0x00, &data);
-
-	DPRINTK("%s--value to DLL :%x\n", "DLL updated...", data);
-
-	data = (divisor & 0xff00) >> 8); /* HIGH byte */
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
-		   MOS_UART_REG, 0x01, &data);
-
-	DPRINTK("%s--value to DLM :%x\n", "DLM updated...", data);
-
-	/* Restore original value to disable access to divisor latch */
-	data = mos7703_port->shadowLCR;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
-		   MOS_UART_REG, 0x03, &data);
-
-	DPRINTK("%s\n", "LCR Restored...");
-
-	DPRINTK("%s\n", "Leaving FUNC <calc_baud_rate_divisor>");
-
-	return status;
-}
-
-/*****************************************************************************
- * calc_baud_rate_divisor
- * this function calculates the proper baud rate divisor for the specified
- * baud rate.
- *****************************************************************************/
-static int calc_baud_rate_divisor(int baudrate, int *divisor)
-{
-	int i;
-	u16 custom;
-	u16 round1;
-	u16 round;
-
-	dbg("%s - %d", __FUNCTION__, baudrate);
-
-	for (i = 0; i < NUM_ENTRIES(divisor_table); i++) {
-		if (divisor_table[i].BaudRate == baudrate) {
-			*divisor = divisor_table[i].Divisor;
-			return 0;
-		}
-	}
-
-	/* We have tried all of the standard baud rates;
-	 * let's try to calculate the divisor for this baud rate.
-	 * Make sure the baud rate is reasonable.
-	 */
-	if (baudrate > 75 && baudrate < 230400) {
-		/* get divisor */
-		custom = (u16) (230400L / baudrate);
-
-		/* Check for round off */
-		round1 = (u16) (2304000L / baudrate);
-		round = (u16) (round1 - (custom * 10));
-		if (round > 4) {
-			custom++;
-		}
-
-		*divisor = custom;
-
-		DPRINTK(" Baud %d = %d\n", baudrate, custom);
-		return 0;
-	}
-
-	DPRINTK("%s\n", " Baud calculation Failed...");
-	return -1;
-}
-
-/*****************************************************************************
- * change_port_settings
- * This routine is called to set the UART on the device to match 
- * the specified new settings.
- *****************************************************************************/
-static void change_port_settings(struct tty_struct *tty,
-				 struct moschip_port *mos7703_port,
-				 struct ktermios *old_termios)
-{
-	int baud;
-	unsigned cflag;
-	unsigned iflag;
-	u8 mask = 0xff;
-	u8 lData;
-	u8 lParity;
-	u8 lStop;
-	int status;
-	char data;
-
-	struct usb_serial_port *port;
-
-	if (mos7703_port == NULL)
-		return;
-
-#ifdef xyz
-	port = (struct usb_serial_port *)mos7703_port->port;
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid port \n");
-		return;
-	}
-
-	if (serial_paranoia_check(port->serial, __FUNCTION__)) {
-		DPRINTK("%s", "Invalid Serial \n");
-		return;
-	}
-#endif
-	dbg("%s - port %d", __FUNCTION__, mos7703_port->port->port_number);
-
-	if ((!mos7703_port->open) && (!mos7703_port->openPending)) {
-		dbg("%s - port not opened", __FUNCTION__);
-		return;
-	}
-
-	if (!tty) {
-		dbg("%s - no tty structure", __FUNCTION__);
-		return;
-	}
-
-	lData = LCR_BITS_8;
-	lStop = LCR_STOP_1;
-	lParity = LCR_PAR_NONE;
-
-	/* Change the data length */
-	cflag = tty->termios.c_cflag;
-	iflag = tty->termios.c_iflag;
-
-	switch (cflag & CSIZE) {
-	case CS5:
-		lData = LCR_BITS_5;
-		mask = 0x1f;
-		DPRINTK("%s\n", " data bits = 5");
-		break;
-
-	case CS6:
-		lData = LCR_BITS_6;
-		mask = 0x3f;
-		DPRINTK("%s\n", " data bits = 6");
-		break;
-
-	case CS7:
-		lData = LCR_BITS_7;
-		mask = 0x7f;
-		dbg("%s - data bits = 7", __FUNCTION__);
-		DPRINTK("%s\n", " data bits = 7");
-		break;
-
-	default:
-	case CS8:
-		lData = LCR_BITS_8;
-		dbg("%s - data bits = 8", __FUNCTION__);
-		DPRINTK("%s\n", " data bits = 8");
-		break;
-	}
-
-	/* Change the Parity bit */
-	if (cflag & PARENB) {
-		if (cflag & PARODD) {
-			lParity = LCR_PAR_ODD;
-			dbg("%s - parity = odd", __FUNCTION__);
-			DPRINTK("%s\n", " parity = odd");
-		} else {
-			lParity = LCR_PAR_EVEN;
-			dbg("%s - parity = even", __FUNCTION__);
-			DPRINTK("%s\n", " parity = even");
-		}
-	} else {
-		dbg("%s - parity = none", __FUNCTION__);
-		DPRINTK("%s\n", " parity = none");
-	}
-
-	/* Change the Stop bit */
-	if (cflag & CSTOPB) {
-		lStop = LCR_STOP_2;
-		dbg("%s - stop bits = 2", __FUNCTION__);
-		DPRINTK("%s\n", " stop bits = 2");
-	} else {
-		lStop = LCR_STOP_1;
-		dbg("%s - stop bits = 1", __FUNCTION__);
-		DPRINTK("%s\n", " stop bits = 1");
-	}
-
-	if (cflag & CMSPAR) {
-		lParity = lParity | 0x20;
-	}
-
-	/* update the LCR with the correct LCR value */
-	mos7703_port->shadowLCR &=
-	    ~(LCR_BITS_MASK | LCR_STOP_MASK | LCR_PAR_MASK);
-	mos7703_port->shadowLCR |= (lData | lParity | lStop);
-
-        /* Disable Interrupts */
-	data = 0x00;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE, MOS_UART_REG, IER,
-		   &data);
-	data = 0x00;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE, MOS_UART_REG, FCR,
-		   &data);
-	data = 0xcf;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE, MOS_UART_REG, FCR,
-		   &data);
-
-        /* Send the updated LCR value to the mos7703 */
-	data = mos7703_port->shadowLCR;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
-		   MOS_UART_REG, LCR, &data);
-
-	data = 0x00b;
-	mos7703_port->shadowMCR = data;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
-	data = 0x00b;
-	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x04, &data);
-
-	/* set up the MCR register and send it to the mos7703 */
-	mos7703_port->shadowMCR = MCR_MASTER_IE;
-	if (cflag & CBAUD) {
-		mos7703_port->shadowMCR |= (MCR_DTR | MCR_RTS);
-	}
-
-	if (cflag & CRTSCTS) {
-		mos7703_port->shadowMCR |= (MCR_XON_ANY);
-	} else {
-		mos7703_port->shadowMCR &= ~(MCR_XON_ANY);
-	}
-
-	data = mos7703_port->shadowMCR;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
-		   MOS_UART_REG, MCR, &data);
-
-	/* Determine divisor based on baud rate */
-	baud = tty_get_baud_rate(tty);
-	DPRINTK("%s-- baud = %d\n", "Back from <tty_get_baud_rate>...", baud);
-
-	if (baud > 115200) {
-		set_high_rates(mos7703_port, &baud);
-		/* Enable Interrupts */
-		data = 0x0c;
-		SendMosCmd(mos7703_port->port->serial, MOS_WRITE, MOS_UART_REG,
-			   IER, &data);
-		return;
-	}
-	if (!baud) {
-		DPRINTK("%s\n", "Picked default baud...");
-		baud = 9600;
-	}
-
-	dbg("%s - baud rate = %d", __FUNCTION__, baud);
-	status = send_cmd_write_baud_rate(mos7703_port, baud);
-	wake_up(&mos7703_port->delta_msr_wait);
-	mos7703_port->delta_msr_cond = 1;
-	return;
 }
 
 /****************************************************************************
