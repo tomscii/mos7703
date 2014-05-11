@@ -17,6 +17,7 @@
  *	Tom Szilagyi <tomszilagyi@gmail.com>
  */
 #include <linux/kernel.h>
+#include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -96,7 +97,7 @@ static void mos7703_interrupt_callback(struct urb *urb)
 	int length;
 	int result;
 	struct moschip_port *mos7703_port;
-	__u32 *data;
+	u32 *data;
 
 	if (!urb) {
 		DPRINTK("%s", "Invalid Pointer !!!!:\n");
@@ -273,14 +274,14 @@ static void mos7703_bulk_out_data_callback(struct urb *urb)
  *   pointer to data/buffer
  *****************************************************************************/
 
-static int SendMosCmd(struct usb_serial *serial, __u8 request, __u16 value,
-		      __u16 index, void *data)
+static int SendMosCmd(struct usb_serial *serial, u8 request, u16 value,
+		      u16 index, void *data)
 {
 	int timeout;
 	int status;
 
-	__u8 requesttype;
-	__u16 size;
+	u8 requesttype;
+	u16 size;
 	unsigned int Pipe;
 #ifdef xyz
 	if (serial_paranoia_check(serial, __FUNCTION__)) {
@@ -293,14 +294,14 @@ static int SendMosCmd(struct usb_serial *serial, __u8 request, __u16 value,
 	timeout = MOS_WDR_TIMEOUT;
 
 	if (request == MOS_WRITE) {
-		request = (__u8) MOS_WRITE;
-		requesttype = (__u8) 0x40;
+		request = (u8) MOS_WRITE;
+		requesttype = (u8) 0x40;
 		if (data)
-			value = value + (__u16) * ((unsigned char *)data);
+			value = value + (u16) * ((unsigned char *)data);
 		Pipe = usb_sndctrlpipe(serial->dev, 0);
 	} else {
-		request = (__u8) MOS_READ;
-		requesttype = (__u8) 0xC0;
+		request = (u8) MOS_READ;
+		requesttype = (u8) 0xC0;
 		size = 0x01;
 		Pipe = usb_rcvctrlpipe(serial->dev, 0);
 	}
@@ -1441,9 +1442,9 @@ static int send_cmd_write_baud_rate(struct moschip_port *mos7703_port,
 static int calc_baud_rate_divisor(int baudrate, int *divisor)
 {
 	int i;
-	__u16 custom;
-	__u16 round1;
-	__u16 round;
+	u16 custom;
+	u16 round1;
+	u16 round;
 
 	dbg("%s - %d", __FUNCTION__, baudrate);
 
@@ -1460,11 +1461,11 @@ static int calc_baud_rate_divisor(int baudrate, int *divisor)
 	 */
 	if (baudrate > 75 && baudrate < 230400) {
 		/* get divisor */
-		custom = (__u16) (230400L / baudrate);
+		custom = (u16) (230400L / baudrate);
 
 		/* Check for round off */
-		round1 = (__u16) (2304000L / baudrate);
-		round = (__u16) (round1 - (custom * 10));
+		round1 = (u16) (2304000L / baudrate);
+		round = (u16) (round1 - (custom * 10));
 		if (round > 4) {
 			custom++;
 		}
@@ -1491,10 +1492,10 @@ static void change_port_settings(struct tty_struct *tty,
 	int baud;
 	unsigned cflag;
 	unsigned iflag;
-	__u8 mask = 0xff;
-	__u8 lData;
-	__u8 lParity;
-	__u8 lStop;
+	u8 mask = 0xff;
+	u8 lData;
+	u8 lParity;
+	u8 lStop;
 	int status;
 	char data;
 
@@ -1708,7 +1709,7 @@ static int mos7703_startup(struct usb_serial *serial)
 
 	/* setting configuration feature to one */
 	usb_control_msg(serial->dev, usb_sndctrlpipe(serial->dev, 0),
-			(__u8) 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 5 * HZ);
+			(u8) 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 5 * HZ);
 
 	return 0;
 

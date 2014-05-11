@@ -73,9 +73,9 @@ struct moschip_port {
 	struct urb *write_urb;	/* write URB for this port */
 	struct urb *read_urb;	/* read URB for this port */
 
-	__u8 shadowLCR;		/* last LCR value received */
-	__u8 shadowMCR;		/* last MCR value received */
-	__u8 shadowMSR;		/* last MSR value received */
+	u8 shadowLCR;		/* last LCR value received */
+	u8 shadowMCR;		/* last MCR value received */
+	u8 shadowMSR;		/* last MSR value received */
 
 	char open;
 	char openPending;
@@ -93,8 +93,8 @@ struct moschip_port {
 
 /* baud rate information */
 struct divisor_table_entry {
-	__u32 BaudRate;
-	__u16 Divisor;
+	u32 BaudRate;
+	u16 Divisor;
 };
 
 //
@@ -145,8 +145,8 @@ static int mos7703_ioctl(struct tty_struct *tty,
 static int mos7703_startup(struct usb_serial *serial);
 
 /* function prototypes for all of our local functions */
-static int SendMosCmd(struct usb_serial *serial, __u8 request, __u16 value,
-		      __u16 index, void *data);
+static int SendMosCmd(struct usb_serial *serial, u8 request, u16 value,
+		      u16 index, void *data);
 static int calc_baud_rate_divisor(int baud_rate, int *divisor);
 static int send_cmd_write_baud_rate(struct moschip_port *mos7703_port,
 				    int baudRate);
