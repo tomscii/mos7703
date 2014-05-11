@@ -497,7 +497,6 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 
 	/* Must always set this bit to enable ints! */
 	mos7703_port->shadowMCR = MCR_MASTER_IE;
-	mos7703_port->chaseResponsePending = FALSE;
 
 	/* send a open port command */
 	mos7703_port->openPending = FALSE;
@@ -582,45 +581,9 @@ static void mos7703_close(struct usb_serial_port *port)
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x01, &data);
 
 	mos7703_port->open = FALSE;
-	mos7703_port->closePending = FALSE;
 	mos7703_port->openPending = FALSE;
 
 	DPRINTK("%s \n", "Leaving ............");
-}
-
-/*****************************************************************************
- * SerialBreak
- * this function sends a break to the port
- *****************************************************************************/
-static void mos7703_break(struct tty_struct *tty, int break_state)
-{
-	struct usb_serial_port *port = tty->driver_data;
-	struct usb_serial *serial;
-	struct moschip_port *mos7703_port;
-
-	DPRINTK("%s \n", "Entering ...........");
-
-#ifdef xyz
-	if (port_paranoia_check(port, __FUNCTION__)) {
-		DPRINTK("%s", "Port Paranoia failed \n");
-		return;
-	}
-
-	serial = get_usb_serial(port, __FUNCTION__);
-	if (!serial) {
-		DPRINTK("%s", "Serial Paranoia failed \n");
-		return;
-	}
-#endif
-	mos7703_port = usb_get_serial_port_data(port);
-	if (mos7703_port == NULL) {
-		return;
-	}
-
-	/* flush and chase */
-	mos7703_port->chaseResponsePending = TRUE;
-
-	return;
 }
 
 /*****************************************************************************
@@ -1823,7 +1786,6 @@ static struct usb_serial_driver mcs7703_driver = {
 	.write_room = mos7703_write_room,
 	.ioctl = mos7703_ioctl,
 	.set_termios = mos7703_set_termios,
-	.break_ctl = mos7703_break,
 	.chars_in_buffer = mos7703_chars_in_buffer,
 	.throttle = mos7703_throttle,
 	.unthrottle = mos7703_unthrottle,

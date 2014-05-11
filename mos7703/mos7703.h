@@ -87,12 +87,7 @@ struct moschip_port {
 
 	char open;
 	char openPending;
-
-	char commandPending;
-
 	char closePending;
-
-	char chaseResponsePending;
 
 	wait_queue_head_t delta_msr_wait; /* for handling sleeping while waiting for msr change to happen */
 	int delta_msr_cond;
@@ -144,7 +139,6 @@ static void mos7703_bulk_out_data_callback(struct urb *urb);
 /* function prototypes for the usbserial callbacks */
 static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port);
 static void mos7703_close(struct usb_serial_port *port);
-//static int  mos7703_write                     (struct usb_serial_port *port, int from_user, const unsigned char *buf, int count);
 static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 			 const unsigned char *data, int count);
 static int mos7703_write_room(struct tty_struct *tty);
@@ -156,7 +150,6 @@ static void mos7703_set_termios(struct tty_struct *tty,
 				struct ktermios *old_termios);
 static int mos7703_ioctl(struct tty_struct *tty,
 			 unsigned int cmd, unsigned long arg);
-static void mos7703_break(struct tty_struct *tty, int break_state);
 static int mos7703_startup(struct usb_serial *serial);
 
 /* function prototypes for all of our local functions */
