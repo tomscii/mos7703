@@ -146,8 +146,6 @@ struct moschip_port {
 	__s16 rxBytesAvail;	/* the number of bytes that we need to read from this device */
 	__s16 rxBytesRemaining;	/* the number of port bytes left to read */
 
-	char write_in_progress;	/* TRUE while a write URB is outstanding */
-
 	__u8 shadowLCR;		/* last LCR value received */
 	__u8 shadowMCR;		/* last MCR value received */
 	__u8 shadowMSR;		/* last MSR value received */

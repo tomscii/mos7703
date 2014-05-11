@@ -264,9 +264,6 @@ static void mos7703_bulk_out_data_callback(struct urb *urb)
 		/* tell the tty driver that something has changed */
 		wake_up_interruptible(&tty->write_wait);
 	}
-
-	/* Release the Write URB */
-	mos7703_port->write_in_progress = FALSE;
 }
 
 /*****************************************************************************
