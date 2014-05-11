@@ -93,43 +93,10 @@ struct moschip_product_info {
 
 };
 
-
-/* Transmit Fifo 
- * This Transmit queue is an extension of the moschip Rx buffer. 
- * The maximum amount of data buffered in both the moschip 
- * Rx buffer (maxTxCredits) and this buffer will never exceed maxTxCredits.
- */
-struct TxFifo {
-	unsigned int head;	/* index to head pointer (write) */
-	unsigned int tail;	/* index to tail pointer (read)  */
-	unsigned int count;	/* Bytes in queue */
-	unsigned int size;	/* Max size of queue (equal to Max number of TxCredits) */
-	unsigned char *fifo;	/* allocated Buffer */
-};
-
-#if 0
-
-/* Reciever Fifo 
- * This Transmit queue is an extension of the moschip Rx buffer. 
- * The maximum amount of data buffered in both the moschip 
- * Rx buffer (maxTxCredits) and this buffer will never exceed maxTxCredits.
- */
-struct RxFifo {
-	unsigned int head;	/* index to head pointer (write) */
-	unsigned int tail;	/* index to tail pointer (read)  */
-	unsigned int count;	/* Bytes in queue */
-	unsigned int size;	/* Max size of queue (equal to Max number of TxCredits) */
-	unsigned char *fifo;	/* allocated Buffer */
-};
-
-#endif
-
 /* This structure holds all of the local port information */
 struct moschip_port {
 	__u16 txCredits;	/* our current credits for this port */
 	__u16 maxTxCredits;	/* the max size of the port */
-
-	struct TxFifo txfifo;	/* transmit fifo -- size will be maxTxCredits */
 
 	__u8 bulk_out_endpoint;	/* the bulk out endpoint handle */
 	unsigned char *bulk_out_buffer;	/* the buffer we use for the bulk out endpoint */
@@ -138,10 +105,6 @@ struct moschip_port {
 	__u8 bulk_in_endpoint;	/* the bulk in endpoint handle */
 	unsigned char *bulk_in_buffer;	/* the buffer we use for the bulk in endpoint */
 	struct urb *read_urb;	/* read URB for this port */
-
-#if 0
-	struct RxFifo rxfifo;
-#endif
 
 	__s16 rxBytesAvail;	/* the number of bytes that we need to read from this device */
 	__s16 rxBytesRemaining;	/* the number of port bytes left to read */

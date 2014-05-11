@@ -513,23 +513,9 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	mos7703_port->open = TRUE;
 
 	change_port_settings(tty, mos7703_port, old_termios);
-	/* create the txfifo */
-	mos7703_port->txfifo.head = 0;
-	mos7703_port->txfifo.tail = 0;
-	mos7703_port->txfifo.count = 0;
-
 	mos7703_port->maxTxCredits = 4096;
-
-	mos7703_port->txfifo.size = mos7703_port->maxTxCredits;
-	mos7703_port->txfifo.fifo = kmalloc(mos7703_port->maxTxCredits,
-					    GFP_KERNEL);
 	mos7703_port->rxBytesAvail = 0x0;
 
-	if (!mos7703_port->txfifo.fifo) {
-		dbg("%s - no memory", __FUNCTION__);
-		mos7703_close(port);
-		return -ENOMEM;
-	}
 	DPRINTK("%s(%d) - Initialize TX fifo to %d bytes", __FUNCTION__,
 		port->port_number, mos7703_port->maxTxCredits);
 
@@ -1032,8 +1018,7 @@ static int get_lsr_info(struct tty_struct *tty,
 {
 	unsigned int result = 0;
 
-	if (mos7703_port->maxTxCredits == mos7703_port->txCredits &&
-	    mos7703_port->txfifo.count == 0) {
+	if (mos7703_port->maxTxCredits == mos7703_port->txCredits) {
 
 		dbg("%s -- Empty", __FUNCTION__);
 		result = TIOCSER_TEMT;
