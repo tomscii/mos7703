@@ -53,14 +53,6 @@
 #define FALSE		(0)
 #endif
 
-#ifndef LOW8
-#define LOW8(val)	((unsigned char)(val & 0xff))
-#endif
-
-#ifndef HIGH8
-#define HIGH8(val)	((unsigned char)((val & 0xff00) >> 8))
-#endif
-
 #ifndef NUM_ENTRIES
 #define NUM_ENTRIES(x)	(sizeof(x)/sizeof((x)[0]))
 #endif

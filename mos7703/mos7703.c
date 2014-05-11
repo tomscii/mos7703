@@ -1410,13 +1410,13 @@ static int send_cmd_write_baud_rate(struct moschip_port *mos7703_port,
 	DPRINTK("%s\n", "DLL/DLM enabled...");
 
 	/* Write the divisor itself */
-	data = LOW8(divisor);
+	data = divisor & 0xff; /* LOW byte */
 	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
 		   MOS_UART_REG, 0x00, &data);
 
 	DPRINTK("%s--value to DLL :%x\n", "DLL updated...", data);
 
-	data = HIGH8(divisor);
+	data = (divisor & 0xff00) >> 8); /* HIGH byte */
 	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
 		   MOS_UART_REG, 0x01, &data);
 
