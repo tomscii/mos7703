@@ -13,7 +13,7 @@
  *	Ravikanth G
  *	Sandilya Bhagi
  *
- * Cleaned up from the original and ported to latest Linux kernel by:
+ * Cleaned up from the original and ported to latest Linux kernels by:
  *	Tom Szilagyi <tomszilagyi@gmail.com>
  */
 #include <linux/kernel.h>
@@ -61,9 +61,7 @@ static struct usb_device_id id_table[] = {
 };
 MODULE_DEVICE_TABLE(usb, id_table);
 
-/*
- * Defines used for sending commands to port 
- */
+/* Defines used for sending commands to port */
 
 #define WAIT_FOR_EVER   (HZ * 0)	/* timeout urb is wait for ever */
 #define MOS_WDR_TIMEOUT (HZ * 5)	/* default urb timeout */
@@ -93,9 +91,7 @@ static int port_paranoia_check(struct usb_serial_port *port,
  * interrupt endpoint.
  * Input : 1 Input
  *   pointer to the URB packet,
- *
  *****************************************************************************/
-
 static void mos7703_interrupt_callback(struct urb *urb)
 {
 	int length;
@@ -130,7 +126,6 @@ static void mos7703_interrupt_callback(struct urb *urb)
 	data = urb->transfer_buffer;
 
 	mos7703_port = (struct moschip_port *)urb->context;
-
 	if (!mos7703_port) {
 		DPRINTK("%s", "NULL mos7703_serial pointer \n");
 		return;
@@ -142,7 +137,6 @@ static void mos7703_interrupt_callback(struct urb *urb)
 	 * Byte 3 --------------
 	 * Byte 4 FIFO status for both 
 	 */
-
 	if (length && length > 4) {
 		DPRINTK("%s \n", "Wrong data !!!!!!!!!!!!");
 		return;
@@ -166,7 +160,6 @@ static void mos7703_interrupt_callback(struct urb *urb)
  *   pointer to the URB packet,
  *
  *****************************************************************************/
-
 static void mos7703_bulk_in_callback(struct urb *urb)
 {
 	int status;
@@ -176,7 +169,6 @@ static void mos7703_bulk_in_callback(struct urb *urb)
 	struct moschip_serial *mos7703_serial;
 	struct moschip_port *mos7703_port;
 	struct tty_struct *tty;
-	//int i;
 
 	if (urb->status) {
 		DPRINTK("nonzero read bulk status received: %d\n", urb->status);
@@ -222,7 +214,6 @@ static void mos7703_bulk_in_callback(struct urb *urb)
 	if (mos7703_port->read_urb->status != -EINPROGRESS) {
 		mos7703_port->read_urb->dev = serial->dev;
 		status = usb_submit_urb(mos7703_port->read_urb, GFP_ATOMIC);
-
 		if (status) {
 			DPRINTK
 			    (" usb_submit_urb(read bulk) failed, status = %d\n",
@@ -239,7 +230,6 @@ static void mos7703_bulk_in_callback(struct urb *urb)
  *   pointer to the URB packet,
  *
  *****************************************************************************/
-
 static void mos7703_bulk_out_data_callback(struct urb *urb)
 {
 	struct moschip_port *mos7703_port;
@@ -262,10 +252,9 @@ static void mos7703_bulk_out_data_callback(struct urb *urb)
 	}
 #endif
 	tty = mos7703_port->tty;
-
 	if (tty) {
-		/* let the tty driver wakeup if it has a special write_wakeup function.
-		 */
+		/* let the tty driver wakeup if it has a special write_wakeup
+		   function. */
 		if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
 		    tty->ldisc->ops->write_wakeup) {
 
@@ -661,10 +650,6 @@ static void mos7703_break(struct tty_struct *tty, int break_state)
 		return;
 	}
 #endif
-	/*
-	   mos7703_serial = (struct moschip_serial *)serial->private;
-	   Mos7703_port = (struct moschip_port *)port->private;
-	 */
 	mos7703_serial = usb_get_serial_data(serial);
 	mos7703_port = usb_get_serial_port_data(port);
 
@@ -764,7 +749,6 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 	int bytes_sent = 0;
 	int transfer_size;
 	int status;
-	int from_user = 0;
 	struct moschip_port *mos7703_port;
 	struct usb_serial *serial;
 	struct moschip_serial *mos7703_serial;
@@ -826,18 +810,7 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 	}
 
 	transfer_size = min(count, URB_TRANSFER_BUFFER_SIZE);
-
-	if (from_user) {
-		if (copy_from_user(urb->transfer_buffer, current_position,
-				   transfer_size)) {
-			bytes_sent = -EFAULT;
-			DPRINTK("From User !!!!!!\n");
-			goto exit;
-		}
-	} else {
-		memcpy(urb->transfer_buffer, current_position, transfer_size);
-	}
-
+	memcpy(urb->transfer_buffer, current_position, transfer_size);
 	DPRINTK("transfer_size:%d	transfer_buffer:%s\n", transfer_size,
 		(char *)urb->transfer_buffer);
 
@@ -1907,10 +1880,6 @@ static int serial_paranoia_check(struct usb_serial *serial,
 		dbg("%s - serial == NULL", function);
 		return -1;
 	}
-//      if (serial->magic != USB_SERIAL_MAGIC) {
-//              dbg("%s - bad magic number for serial", function);
-//              return -1;
-//      }
 	if (!serial->type) {
 		dbg("%s - serial->type == NULL!", function);
 		return -1;
@@ -1926,10 +1895,6 @@ static int port_paranoia_check(struct usb_serial_port *port,
 		dbg("%s - port == NULL", function);
 		return -1;
 	}
-//      if (port->magic != USB_SERIAL_PORT_MAGIC) {
-//              dbg("%s - bad magic number for port", function);
-//              return -1;
-//      }
 	if (!port->serial) {
 		dbg("%s - port->serial == NULL", function);
 		return -1;
