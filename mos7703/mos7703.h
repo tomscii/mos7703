@@ -87,8 +87,6 @@ struct moschip_port {
 	__u8 shadowXonChar;	/* last value set as XON char in moschip */
 	__u8 shadowXoffChar;	/* last value set as XOFF char in moschip */
 
-	__u8 validDataMask;
-
 	__u32 baudRate;
 
 	char open;

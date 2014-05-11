@@ -1658,7 +1658,6 @@ static void change_port_settings(struct tty_struct *tty,
 	mos7703_port->shadowLCR &=
 	    ~(LCR_BITS_MASK | LCR_STOP_MASK | LCR_PAR_MASK);
 	mos7703_port->shadowLCR |= (lData | lParity | lStop);
-	mos7703_port->validDataMask = mask;
 
         /* Disable Interrupts */
 	data = 0x00;
