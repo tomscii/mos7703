@@ -43,16 +43,6 @@
 #if !defined(_MOS_CIP_H_)
 #define	_MOS_CIP_H_
 
-/* typedefs that the insideout headers need */
-
-#ifndef TRUE
-#define TRUE		(1)
-#endif
-
-#ifndef FALSE
-#define FALSE		(0)
-#endif
-
 #ifndef NUM_ENTRIES
 #define NUM_ENTRIES(x)	(sizeof(x)/sizeof((x)[0]))
 #endif

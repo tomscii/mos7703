@@ -493,8 +493,8 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	mos7703_port->shadowMCR = MCR_MASTER_IE;
 
 	/* send a open port command */
-	mos7703_port->openPending = FALSE;
-	mos7703_port->open = TRUE;
+	mos7703_port->openPending = 0;
+	mos7703_port->open = 1;
 
 	change_port_settings(tty, mos7703_port, old_termios);
 
@@ -574,8 +574,8 @@ static void mos7703_close(struct usb_serial_port *port)
 	data = 0x00;
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x01, &data);
 
-	mos7703_port->open = FALSE;
-	mos7703_port->openPending = FALSE;
+	mos7703_port->open = 0;
+	mos7703_port->openPending = 0;
 
 	DPRINTK("%s \n", "Leaving ............");
 }
