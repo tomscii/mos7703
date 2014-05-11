@@ -1051,25 +1051,6 @@ static int get_lsr_info(struct tty_struct *tty,
 	return 0;
 }
 
-#if 0 // tom: belongs to dropped ioctl cmd
-static int get_number_bytes_avail(struct tty_struct *tty,
-				  struct moschip_port *mos7703_port,
-				  unsigned int *value)
-{
-	unsigned int result = 0;
-
-	if (!tty)
-		return -ENOIOCTLCMD;
-
-	result = tty->read_cnt; // tom: no such member
-
-	if (copy_to_user(value, &result, sizeof(int)))
-		return -EFAULT;
-
-	return -ENOIOCTLCMD;
-}
-#endif
-
 #if 0 // this is unused, but may be useful to compare w/ set_high_rates() below
 static int set_higher_rates(struct moschip_port *mos7703_port, int *value)
 {
@@ -1395,13 +1376,6 @@ static int mos7703_ioctl(struct tty_struct *tty,
 	dbg("%s - port %d, cmd = 0x%x", __FUNCTION__, port->port_number, cmd);
 
 	switch (cmd) {
-		/* return number of bytes available */
-#if 0 // tom: this seems not supported by mos7720, so maybe we can drop this
-	case TIOCINQ:
-		dbg("%s (%d) TIOCINQ", __FUNCTION__, port->number);
-		return get_number_bytes_avail(tty, mos7703_port,
-					      (unsigned int *)arg);
-#endif
 	case TIOCSERGETLSR:
 		dbg("%s (%d) TIOCSERGETLSR", __FUNCTION__, port->port_number);
 		return get_lsr_info(tty, mos7703_port, (unsigned int *)arg);
