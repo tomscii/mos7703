@@ -510,7 +510,6 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	mos7703_port->open = TRUE;
 
 	change_port_settings(tty, mos7703_port, old_termios);
-	mos7703_port->rxBytesAvail = 0x0;
 
 	return 0;
 }

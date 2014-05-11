@@ -103,9 +103,6 @@ struct moschip_port {
 	unsigned char *bulk_in_buffer;	/* the buffer we use for the bulk in endpoint */
 	struct urb *read_urb;	/* read URB for this port */
 
-	__s16 rxBytesAvail;	/* the number of bytes that we need to read from this device */
-	__s16 rxBytesRemaining;	/* the number of port bytes left to read */
-
 	__u8 shadowLCR;		/* last LCR value received */
 	__u8 shadowMCR;		/* last MCR value received */
 	__u8 shadowMSR;		/* last MSR value received */
@@ -151,19 +148,9 @@ struct moschip_serial {
 
 	__u8 bulk_out_endpoint;	/* the bulk out endpoint handle */
 
-	__s16 rxBytesAvail;	/* the number of bytes that we need to read from this device */
-
-#if 0
-	enum RXSTATE rxState;	/* the current state of the bulk receive processor */
-	__u8 rxHeader1;		/* receive header byte 1 */
-	__u8 rxHeader2;		/* receive header byte 2 */
-	__u8 rxHeader3;		/* receive header byte 3 */
-#endif
-
 	__u8 rxPort;		/* the port that we are currently receiving data for */
 	__u8 rxStatusCode;	/* the receive status code */
 	__u8 rxStatusParam;	/* the receive status paramater */
-	__s16 rxBytesRemaining;	/* the number of port bytes left to read */
 	struct usb_serial *serial;	/* loop back to the owner of this object */
 };
 
