@@ -465,15 +465,9 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	DPRINTK("port int end point  %x \n",
 		port->interrupt_in_endpointAddress);
 
-	mos7703_port->bulk_in_buffer = port->bulk_in_buffer;
-	mos7703_port->bulk_in_endpoint = port->bulk_in_endpointAddress;
-
 	mos7703_port->read_urb = port->read_urb;
 
-	mos7703_port->bulk_out_endpoint = port->bulk_out_endpointAddress;
-
 	/* set up our bulk in urb */
-
 	usb_fill_bulk_urb(mos7703_port->read_urb,
 			  serial->dev,
 			  usb_rcvbulkpipe(serial->dev,

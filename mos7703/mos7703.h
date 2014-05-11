@@ -65,25 +65,17 @@
 #define NUM_ENTRIES(x)	(sizeof(x)/sizeof((x)[0]))
 #endif
 
-#define MAX_NAME_LEN	64
-
 #define NUM_URBS                        32	/* URB Count */
 #define URB_TRANSFER_BUFFER_SIZE        32	/* URB Size  */
 
 /* This structure holds all of the local port information */
 struct moschip_port {
-	__u8 bulk_out_endpoint;	/* the bulk out endpoint handle */
-	unsigned char *bulk_out_buffer;	/* the buffer we use for the bulk out endpoint */
 	struct urb *write_urb;	/* write URB for this port */
-
-	__u8 bulk_in_endpoint;	/* the bulk in endpoint handle */
-	unsigned char *bulk_in_buffer;	/* the buffer we use for the bulk in endpoint */
 	struct urb *read_urb;	/* read URB for this port */
 
 	__u8 shadowLCR;		/* last LCR value received */
 	__u8 shadowMCR;		/* last MCR value received */
 	__u8 shadowMSR;		/* last MSR value received */
-	__u32 baudRate;
 
 	char open;
 	char openPending;
