@@ -501,9 +501,6 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	/* initialize our icount structure */
 	memset(&(mos7703_port->icount), 0x00, sizeof(mos7703_port->icount));
 
-	/* initialize our port settings */
-	mos7703_port->txCredits = 0;	/* Can't send any data yet */
-
 	/* Must always set this bit to enable ints! */
 	mos7703_port->shadowMCR = MCR_MASTER_IE;
 	mos7703_port->chaseResponsePending = FALSE;
@@ -513,11 +510,7 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	mos7703_port->open = TRUE;
 
 	change_port_settings(tty, mos7703_port, old_termios);
-	mos7703_port->maxTxCredits = 4096;
 	mos7703_port->rxBytesAvail = 0x0;
-
-	DPRINTK("%s(%d) - Initialize TX fifo to %d bytes", __FUNCTION__,
-		port->port_number, mos7703_port->maxTxCredits);
 
 	return 0;
 }
@@ -648,7 +641,6 @@ static void mos7703_break(struct tty_struct *tty, int break_state)
  * this function is called by the tty driver when it wants to know how many
  * bytes of data we can accept for a specific port.
  * If successful, we return the amount of room that we have for this port
- * (the txCredits), 
  * Otherwise we return a negative error number.
  *****************************************************************************/
 static int mos7703_write_room(struct tty_struct *tty)
@@ -1016,14 +1008,7 @@ static void mos7703_set_termios(struct tty_struct *tty,
 static int get_lsr_info(struct tty_struct *tty,
 		struct moschip_port *mos7703_port, unsigned int __user *value)
 {
-	unsigned int result = 0;
-
-	if (mos7703_port->maxTxCredits == mos7703_port->txCredits) {
-
-		dbg("%s -- Empty", __FUNCTION__);
-		result = TIOCSER_TEMT;
-	}
-
+	unsigned int result = TIOCSER_TEMT;
 	if (copy_to_user(value, &result, sizeof(int)))
 		return -EFAULT;
 
@@ -1317,7 +1302,7 @@ static int get_serial_info(struct moschip_port *mos7703_port,
 	tmp.port = mos7703_port->port->port_number;
 	tmp.irq = 0;
 	tmp.flags = ASYNC_SKIP_TEST | ASYNC_AUTO_IRQ;
-	tmp.xmit_fifo_size = mos7703_port->maxTxCredits;
+	tmp.xmit_fifo_size = 4096;
 	tmp.baud_base = 9600;
 	tmp.close_delay = 5 * HZ;
 	tmp.closing_wait = 30 * HZ;

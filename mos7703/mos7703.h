@@ -95,9 +95,6 @@ struct moschip_product_info {
 
 /* This structure holds all of the local port information */
 struct moschip_port {
-	__u16 txCredits;	/* our current credits for this port */
-	__u16 maxTxCredits;	/* the max size of the port */
-
 	__u8 bulk_out_endpoint;	/* the bulk out endpoint handle */
 	unsigned char *bulk_out_buffer;	/* the buffer we use for the bulk out endpoint */
 	struct urb *write_urb;	/* write URB for this port */
