@@ -498,11 +498,8 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 		    response);
 	}
 
-	/* initialize our wait queues */
-	init_waitqueue_head(&mos7703_port->wait_open);
-	init_waitqueue_head(&mos7703_port->wait_chase);
+	/* initialize our wait queue */
 	init_waitqueue_head(&mos7703_port->delta_msr_wait);
-	init_waitqueue_head(&mos7703_port->wait_command);
 
 	/* initialize our icount structure */
 	memset(&(mos7703_port->icount), 0x00, sizeof(mos7703_port->icount));
