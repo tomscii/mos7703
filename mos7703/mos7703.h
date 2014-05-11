@@ -70,29 +70,6 @@
 #define NUM_URBS                        32	/* URB Count */
 #define URB_TRANSFER_BUFFER_SIZE        32	/* URB Size  */
 
-
-/*
- *	Product information read from the Moschip. Provided for later upgrade
- */
-struct moschip_product_info {
-	__u16 ProductId;	/* Product Identifier */
-	__u8 NumPorts;		/* Number of ports on moschip */
-	__u8 ProdInfoVer;	/* What version of structure is this? */
-
-	__u32 IsServer:1;	/* Set if Server */
-	__u32 IsRS232:1;	/* Set if RS-232 ports exist */
-	__u32 IsRS422:1;	/* Set if RS-422 ports exist */
-	__u32 IsRS485:1;	/* Set if RS-485 ports exist */
-	__u32 IsReserved:28;	/* Reserved for later expansion */
-
-	__u8 CpuRev;		/* CPU revision level (chg only if s/w visible) */
-	__u8 BoardRev;		/* PCB revision level (chg only if s/w visible) */
-
-	__u8 ManufactureDescDate[3];	/* MM/DD/YY when descriptor template was compiled */
-	__u8 Unused1[1];	/* Available */
-
-};
-
 /* This structure holds all of the local port information */
 struct moschip_port {
 	__u8 bulk_out_endpoint;	/* the bulk out endpoint handle */
@@ -135,8 +112,6 @@ struct moschip_port {
 /* This structure holds all of the individual serial device information */
 struct moschip_serial {
 	char name[MAX_NAME_LEN + 1];	/* string name of this device */
-
-	struct moschip_product_info product_info;	/* Product Info */
 
 	__u8 interrupt_in_endpoint;	/* the interrupt endpoint handle */
 	unsigned char *interrupt_in_buffer;	/* the buffer we use for the interrupt endpoint */
