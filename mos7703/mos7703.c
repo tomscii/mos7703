@@ -213,7 +213,6 @@ static void mos7703_interrupt_callback(struct urb *urb)
  * bulk in endpoint.
  * Input : 1 Input
  *   pointer to the URB packet,
- *
  *****************************************************************************/
 static void mos7703_bulk_in_callback(struct urb *urb)
 {
@@ -243,8 +242,8 @@ static void mos7703_bulk_in_callback(struct urb *urb)
 
 	if (mos7703_port->read_urb->status != -EINPROGRESS) {
 		mos7703_port->read_urb->dev = mos7703_port->port->serial->dev;
-		status = usb_submit_urb(mos7703_port->read_urb, GFP_ATOMIC);
-		if (status) {
+		retval = usb_submit_urb(mos7703_port->read_urb, GFP_ATOMIC);
+		if (retval) {
 			dev_dbg(dev, "usb_submit_urb(read bulk) failed, retval = %d\n", retval);
 		}
 	}
@@ -256,7 +255,6 @@ static void mos7703_bulk_in_callback(struct urb *urb)
  * on the bulk out endpoint.
  * Input : 1 Input
  *   pointer to the URB packet,
- *
  *****************************************************************************/
 static void mos7703_bulk_out_data_callback(struct urb *urb)
 {
@@ -299,7 +297,6 @@ static void mos7703_bulk_out_data_callback(struct urb *urb)
  *   register index
  *   pointer to data/buffer
  *****************************************************************************/
-
 static int SendMosCmd(struct usb_serial *serial, u8 request, u16 value,
 		      u16 index, void *data)
 {
@@ -741,8 +738,8 @@ static void change_port_settings(struct tty_struct *tty,
 
 	dev_dbg(&port->dev, "%s - baud rate = %d\n", __func__, baud);
 	status = send_cmd_write_baud_rate(mos7703_port, baud);
-	wake_up(&mos7703_port->delta_msr_wait);
 	mos7703_port->delta_msr_cond = 1;
+	wake_up(&mos7703_port->delta_msr_wait);
 	return;
 }
 
@@ -1038,7 +1035,6 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 	struct moschip_port *mos7703_port;
 	struct urb *urb;
 	const unsigned char *current_position = data;
-	static long debugdata = 0;
 
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL) {
@@ -1059,10 +1055,6 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 	if (urb == NULL) {
 		dev_dbg(&port->dev, "%s - no more free urbs\n", __func__);
 		goto exit;
-	}
-
-	if (i > debugdata) {
-		debugdata = i;
 	}
 
 	if (urb->transfer_buffer == NULL) {
@@ -1399,8 +1391,7 @@ static int mos7703_ioctl(struct tty_struct *tty,
 		while (1) {
 			mos7703_port->delta_msr_cond = 0;
 			wait_event_interruptible(mos7703_port->delta_msr_wait,
-						 (mos7703_port->
-						  delta_msr_cond == 1));
+					 (mos7703_port->delta_msr_cond == 1));
 			/* see if a signal did it */
 			if (signal_pending(current))
 				return -ERESTARTSYS;
