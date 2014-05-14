@@ -17,6 +17,8 @@
  *	Tom Szilagyi <tomszilagyi@gmail.com>
  */
 #include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/device.h>
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/init.h>
@@ -24,26 +26,12 @@
 #include <linux/tty.h>
 #include <linux/tty_driver.h>
 #include <linux/tty_flip.h>
-#include <linux/module.h>
 #include <linux/serial.h>
 #include <linux/ioctl.h>
 #include <asm/uaccess.h>
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
 
-/* 1: Enables the debugging :: 0: Disable the debugging */
-#define ASP_DEBUG 0
-
-#if ASP_DEBUG
-#define DPRINTK(fmt, args...) printk( "%s: " fmt, __FUNCTION__ , ## args)
-#define dbg(args...) DPRINTK(args)
-#define err(args...) DPRINTK(args)
-
-#else
-#define DPRINTK(fmt, args...)
-#define dbg(args...)
-#define err(args...)
-#endif
 
 #define DRIVER_AUTHOR "Moschip Semiconductor Tech. Ltd."
 #define DRIVER_DESC "Moschip 7703 USB Serial Driver"
@@ -179,40 +167,26 @@ static void mos7703_interrupt_callback(struct urb *urb)
 {
 	int length;
 	int result;
-	struct moschip_port *mos7703_port;
+	struct device *dev = &urb->dev->dev;
+	int status = urb->status;
 	u32 *data;
 
-	if (!urb) {
-		DPRINTK("%s", "Invalid Pointer !!!!:\n");
-		return;
-	}
-
-	switch (urb->status) {
-
-	case 0:
-		/* success */
-		break;
+	switch (status) {
+	case 0:	break; /* success */
 	case -ECONNRESET:
 	case -ENOENT:
 	case -ESHUTDOWN:
 		/* this urb is terminated, clean up */
-		dbg("%s - urb shutting down with status: %d", __FUNCTION__,
-		    urb->status);
+		dev_dbg(dev, "%s - urb shutting down with status: %d\n", __func__, status);
 		return;
 	default:
-		dbg("%s - nonzero urb status received: %d\n", __FUNCTION__,
-		    urb->status);
+		dev_dbg(dev, "%s - nonzero urb status received: %d\n", __func__, status);
 		goto exit;
 	}
 
 	length = urb->actual_length;
 	data = urb->transfer_buffer;
 
-	mos7703_port = (struct moschip_port *)urb->context;
-	if (!mos7703_port) {
-		DPRINTK("%s", "NULL mos7703_port pointer \n");
-		return;
-	}
 
 	/* Moschip get 4 bytes 
 	 * Byte 1 IIR Port 1 (port.number is 0)
@@ -220,17 +194,15 @@ static void mos7703_interrupt_callback(struct urb *urb)
 	 * Byte 3 --------------
 	 * Byte 4 FIFO status for both 
 	 */
-	if (length && length > 4) {
-		DPRINTK("%s \n", "Wrong data !!!!!!!!!!!!");
+	if (unlikely(length && length > 4)) {
+		dev_dbg(dev, "%s: Wrong data!\n", __func__);
 		return;
 	}
 
  exit:
 	result = usb_submit_urb(urb, GFP_ATOMIC);
 	if (result) {
-		dev_err(&urb->dev->dev,
-			"%s - Error %d submitting control urb\n", __FUNCTION__,
-			result);
+		dev_err(dev, "%s - Error %d submitting control urb\n", __func__, result);
 	}
 	return;
 }
@@ -245,35 +217,27 @@ static void mos7703_interrupt_callback(struct urb *urb)
  *****************************************************************************/
 static void mos7703_bulk_in_callback(struct urb *urb)
 {
-	int status;
+	int retval;
+	int status = urb->status;
 	unsigned char *data;
-	struct moschip_port *mos7703_port;
+	struct moschip_port *mos7703_port = (struct moschip_port *)urb->context;
+	struct device *dev = &urb->dev->dev;
 	struct tty_struct *tty;
 
-	if (urb->status) {
-		DPRINTK("nonzero read bulk status received: %d\n", urb->status);
-		return;
-	}
-
-	mos7703_port = (struct moschip_port *)urb->context;
-	if (!mos7703_port) {
-		DPRINTK("%s", "NULL mos7703_port pointer \n");
+	if (status) {
+		dev_dbg(dev, "nonzero read bulk status received: %d\n", status);
 		return;
 	}
 
 	data = urb->transfer_buffer;
 	if (urb->actual_length) {
 		tty = mos7703_port->tty;
-		if (tty) {
-			tty_insert_flip_string_fixed_flag(tty->port, data,
-							  TTY_NORMAL,
-							  urb->actual_length);
-			tty_flip_buffer_push(tty->port);
-		}
+		tty_insert_flip_string(tty->port, data, urb->actual_length);
+		tty_flip_buffer_push(tty->port);
 	}
 
 	if (!mos7703_port->read_urb) {
-		DPRINTK("%s", "URB KILLED !!!\n");
+		dev_dbg(dev, "%s: URB killed!\n", __func__);
 		return;
 	}
 
@@ -281,9 +245,7 @@ static void mos7703_bulk_in_callback(struct urb *urb)
 		mos7703_port->read_urb->dev = mos7703_port->port->serial->dev;
 		status = usb_submit_urb(mos7703_port->read_urb, GFP_ATOMIC);
 		if (status) {
-			DPRINTK
-			    (" usb_submit_urb(read bulk) failed, status = %d\n",
-			     status);
+			dev_dbg(dev, "usb_submit_urb(read bulk) failed, retval = %d\n", retval);
 		}
 	}
 }
@@ -298,33 +260,33 @@ static void mos7703_bulk_in_callback(struct urb *urb)
  *****************************************************************************/
 static void mos7703_bulk_out_data_callback(struct urb *urb)
 {
-	struct moschip_port *mos7703_port;
+	int status = urb->status;
+	struct moschip_port *mos7703_port = (struct moschip_port *)urb->context;
+	struct device *dev = &urb->dev->dev;
 	struct tty_struct *tty;
 
-	if (urb->status) {
-		DPRINTK("nonzero write bulk status received:%d\n", urb->status);
-		return;
-	}
-
-	mos7703_port = (struct moschip_port *)urb->context;
-	if (!mos7703_port) {
-		DPRINTK("%s", "NULL mos7703_port pointer \n");
+	if (status) {
+		dev_dbg(dev, "nonzero write bulk status received: %d\n", status);
 		return;
 	}
 
 	tty = mos7703_port->tty;
+#if 1
+	if (mos7703_port->open) {
+		tty_port_tty_wakeup(tty->port);
+	}
+#else
 	if (tty) {
-		/* let the tty driver wakeup if it has a special write_wakeup
-		   function. */
+		/* let the tty driver wakeup if it has a special write_wakeup function. */
 		if ((tty->flags & (1 << TTY_DO_WRITE_WAKEUP)) &&
 		    tty->ldisc->ops->write_wakeup) {
-
-			(tty->ldisc->ops->write_wakeup) (tty);
+			(tty->ldisc->ops->write_wakeup)(tty);
 		}
 
 		/* tell the tty driver that something has changed */
 		wake_up_interruptible(&tty->write_wait);
 	}
+#endif
 }
 
 /*****************************************************************************
@@ -343,7 +305,6 @@ static int SendMosCmd(struct usb_serial *serial, u8 request, u16 value,
 {
 	int timeout;
 	int status;
-
 	u8 requesttype;
 	u16 size;
 	unsigned int Pipe;
@@ -370,8 +331,8 @@ static int SendMosCmd(struct usb_serial *serial, u8 request, u16 value,
 				 index, data, size, timeout);
 
 	if (status < 0) {
-		DPRINTK("Command Write failed Value %x index %x\n", value,
-			index);
+		dev_err(&serial->dev->dev, "%s failed: value %x index %x\n",
+			__func__, value, index);
 		return status;
 	}
 	return status;
@@ -398,7 +359,7 @@ static int set_higher_rates(struct moschip_port *mos7703_port, int *value)
 
 	arg = *value;
 
-	DPRINTK("%s", "Sending Setting Commands .......... \n");
+	dev_dbg(&port->dev, "Sending Setting Commands\n");
 
 	data = 0x00;
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x01, &data);
@@ -429,14 +390,14 @@ static int set_higher_rates(struct moschip_port *mos7703_port, int *value)
 	data = mos7703_port->shadowLCR | LCR_DL_ENABLE;
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
 
-	data = 0x001;		/*DLL */
+	data = 0x001; /*DLL */
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x00, &data);
 
-	data = 0x000;		/*DLM */
+	data = 0x000; /*DLM */
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x01, &data);
 
 	data = mos7703_port->shadowLCR & ~LCR_DL_ENABLE;
-	DPRINTK("%s--%x", "value to be written to LCR", data);
+	dev_dbg(&port->dev, "value to be written to LCR: %x\n", data);
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
 	return 0;
 }
@@ -482,7 +443,7 @@ static int set_high_rates(struct moschip_port *mos7703_port, int *value)
 		wValue = 0x70;
 		break;
 	case 6000000:
-		bypass_flag = 1;	// To Enable bypass Clock 96 MHz Clock
+		bypass_flag = 1; // To Enable bypass Clock 96 MHz Clock
 		break;
 	default:
 		return -1;
@@ -504,8 +465,7 @@ static int set_high_rates(struct moschip_port *mos7703_port, int *value)
 
 	if (bypass_flag) {
 		/* If true, will write 0x02 in the control register to
-		   enable the 96MHz Clock. This should be done only for 6 Mbps.
-		*/
+		   enable the 96MHz Clock. This should be done only for 6 Mbps. */
 		SendMosCmd(port->serial, MOS_READ, MOS_VEN_REG, 0x01, &data);
 		data |= 0x02;
 		SendMosCmd(port->serial, MOS_WRITE, MOS_VEN_REG, 0x01, &data);
@@ -526,14 +486,14 @@ static int set_high_rates(struct moschip_port *mos7703_port, int *value)
 	data = mos7703_port->shadowLCR | LCR_DL_ENABLE;
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
 
-	data = 0x01;		/* DLL */
+	data = 0x01; /* DLL */
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x00, &data);
 
-	data = 0x00;		/* DLM */
+	data = 0x00; /* DLM */
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x01, &data);
 
 	data = mos7703_port->shadowLCR & ~LCR_DL_ENABLE;
-	DPRINTK("%s--%x", "value to be written to LCR", data);
+	dev_dbg(&port->dev, "value to be written to LCR: %x\n", data);
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
 
 	return 0;
@@ -544,14 +504,14 @@ static int set_high_rates(struct moschip_port *mos7703_port, int *value)
  * this function calculates the proper baud rate divisor for the specified
  * baud rate.
  *****************************************************************************/
-static int calc_baud_rate_divisor(int baudrate, int *divisor)
+static int calc_baud_rate_divisor(struct device *dev, int baudrate, int *divisor)
 {
 	int i;
 	u16 custom;
 	u16 round1;
 	u16 round;
 
-	dbg("%s - %d", __FUNCTION__, baudrate);
+	dev_dbg(dev, "%s: baudrate=%d\n", __func__, baudrate);
 
 	for (i = 0; i < NUM_ENTRIES(divisor_table); i++) {
 		if (divisor_table[i].BaudRate == baudrate) {
@@ -574,14 +534,13 @@ static int calc_baud_rate_divisor(int baudrate, int *divisor)
 		if (round > 4) {
 			custom++;
 		}
-
 		*divisor = custom;
 
-		DPRINTK(" Baud %d = %d\n", baudrate, custom);
+		dev_dbg(dev, "baudrate=%d custom=%d\n", baudrate, custom);
 		return 0;
 	}
 
-	DPRINTK("%s\n", " Baud calculation Failed...");
+	dev_err(dev, "Baudrate calculation failed for baudrate=%d\n", baudrate);
 	return -1;
 }
 
@@ -597,49 +556,40 @@ static int send_cmd_write_baud_rate(struct moschip_port *mos7703_port,
 	int status;
 	unsigned char data;
 	unsigned char number;
+	struct usb_serial_port * port;
 
 	if (mos7703_port == NULL)
 		return -1;
 
-	number = mos7703_port->port->port_number - mos7703_port->port->minor;
+	port = mos7703_port->port;
+	number = port->port_number - port->minor;
 
-	dbg("%s - port = %d, baud = %d", __FUNCTION__,
-	    mos7703_port->port->port_number, baudRate);
-	status = calc_baud_rate_divisor(baudRate, &divisor);
+	dev_dbg(&port->dev, "%s - port=%d, baud=%d\n", __func__,
+		port->port_number, baudRate);
+	status = calc_baud_rate_divisor(&port->dev, baudRate, &divisor);
 	if (status) {
-		err("%s - bad baud rate", __FUNCTION__);
-		DPRINTK("%s\n", "bad baud rate");
+		dev_err(&port->dev, "%s - bad baud rate\n", __func__);
 		return status;
 	}
 
 	/* Enable access to divisor latch */
 	data = LCR_DL_ENABLE;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
-		   MOS_UART_REG, LCR, &data);
-
-	DPRINTK("%s\n", "DLL/DLM enabled...");
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, LCR, &data);
+	dev_dbg(&port->dev, "DLL/DLM enabled\n");
 
 	/* Write the divisor itself */
 	data = divisor & 0xff; /* LOW byte */
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
-		   MOS_UART_REG, 0x00, &data);
-
-	DPRINTK("%s--value to DLL :%x\n", "DLL updated...", data);
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x00, &data);
+	dev_dbg(&port->dev, "DLL updated: value=%x\n", data);
 
 	data = (divisor & 0xff00) >> 8; /* HIGH byte */
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
-		   MOS_UART_REG, 0x01, &data);
-
-	DPRINTK("%s--value to DLM :%x\n", "DLM updated...", data);
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x01, &data);
+	dev_dbg(&port->dev, "DLM updated: value=%x\n", data);
 
 	/* Restore original value to disable access to divisor latch */
 	data = mos7703_port->shadowLCR;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
-		   MOS_UART_REG, 0x03, &data);
-
-	DPRINTK("%s\n", "LCR Restored...");
-
-	DPRINTK("%s\n", "Leaving FUNC <send_cmd_write_baud_rate>");
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x03, &data);
+	dev_dbg(&port->dev, "LCR restored\n");
 
 	return status;
 }
@@ -669,21 +619,15 @@ static void change_port_settings(struct tty_struct *tty,
 		return;
 
 	port = (struct usb_serial_port *)mos7703_port->port;
-	dbg("%s - port %d", __FUNCTION__, mos7703_port->port->port_number);
+	dev_dbg(&port->dev, "%s - port %d\n", __func__, port->port_number);
 
 	if ((!mos7703_port->open) && (!mos7703_port->openPending)) {
-		dbg("%s - port not opened", __FUNCTION__);
-		return;
-	}
-
-	if (!tty) {
-		dbg("%s - no tty structure", __FUNCTION__);
+		dev_dbg(&port->dev, "%s - port not opened\n", __func__);
 		return;
 	}
 
 	lData = LCR_BITS_8;
 	lStop = LCR_STOP_1;
-	lParity = LCR_PAR_NONE;
 
 	/* Change the data length */
 	cflag = tty->termios.c_cflag;
@@ -693,27 +637,25 @@ static void change_port_settings(struct tty_struct *tty,
 	case CS5:
 		lData = LCR_BITS_5;
 		mask = 0x1f;
-		DPRINTK("%s\n", " data bits = 5");
+		dev_dbg(&port->dev, "data bits = 5\n");
 		break;
 
 	case CS6:
 		lData = LCR_BITS_6;
 		mask = 0x3f;
-		DPRINTK("%s\n", " data bits = 6");
+		dev_dbg(&port->dev, "data bits = 6\n");
 		break;
 
 	case CS7:
 		lData = LCR_BITS_7;
 		mask = 0x7f;
-		dbg("%s - data bits = 7", __FUNCTION__);
-		DPRINTK("%s\n", " data bits = 7");
+		dev_dbg(&port->dev, "data bits = 7\n");
 		break;
 
 	default:
 	case CS8:
 		lData = LCR_BITS_8;
-		dbg("%s - data bits = 8", __FUNCTION__);
-		DPRINTK("%s\n", " data bits = 8");
+		dev_dbg(&port->dev, "data bits = 8\n");
 		break;
 	}
 
@@ -721,27 +663,23 @@ static void change_port_settings(struct tty_struct *tty,
 	if (cflag & PARENB) {
 		if (cflag & PARODD) {
 			lParity = LCR_PAR_ODD;
-			dbg("%s - parity = odd", __FUNCTION__);
-			DPRINTK("%s\n", " parity = odd");
+			dev_dbg(&port->dev, "parity: odd\n");
 		} else {
 			lParity = LCR_PAR_EVEN;
-			dbg("%s - parity = even", __FUNCTION__);
-			DPRINTK("%s\n", " parity = even");
+			dev_dbg(&port->dev, "parity: even\n");
 		}
 	} else {
-		dbg("%s - parity = none", __FUNCTION__);
-		DPRINTK("%s\n", " parity = none");
+		lParity = LCR_PAR_NONE;
+		dev_dbg(&port->dev, "parity: none\n");
 	}
 
 	/* Change the Stop bit */
 	if (cflag & CSTOPB) {
 		lStop = LCR_STOP_2;
-		dbg("%s - stop bits = 2", __FUNCTION__);
-		DPRINTK("%s\n", " stop bits = 2");
+		dev_dbg(&port->dev, "stop bits: 2\n");
 	} else {
 		lStop = LCR_STOP_1;
-		dbg("%s - stop bits = 1", __FUNCTION__);
-		DPRINTK("%s\n", " stop bits = 1");
+		dev_dbg(&port->dev, "stop bits: 1\n");
 	}
 
 	if (cflag & CMSPAR) {
@@ -749,25 +687,20 @@ static void change_port_settings(struct tty_struct *tty,
 	}
 
 	/* update the LCR with the correct LCR value */
-	mos7703_port->shadowLCR &=
-	    ~(LCR_BITS_MASK | LCR_STOP_MASK | LCR_PAR_MASK);
+	mos7703_port->shadowLCR &= ~(LCR_BITS_MASK | LCR_STOP_MASK | LCR_PAR_MASK);
 	mos7703_port->shadowLCR |= (lData | lParity | lStop);
 
         /* Disable Interrupts */
 	data = 0x00;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE, MOS_UART_REG, IER,
-		   &data);
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, IER, &data);
 	data = 0x00;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE, MOS_UART_REG, FCR,
-		   &data);
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, FCR, &data);
 	data = 0xcf;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE, MOS_UART_REG, FCR,
-		   &data);
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, FCR, &data);
 
         /* Send the updated LCR value to the mos7703 */
 	data = mos7703_port->shadowLCR;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
-		   MOS_UART_REG, LCR, &data);
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, LCR, &data);
 
 	data = 0x00b;
 	mos7703_port->shadowMCR = data;
@@ -788,27 +721,25 @@ static void change_port_settings(struct tty_struct *tty,
 	}
 
 	data = mos7703_port->shadowMCR;
-	SendMosCmd(mos7703_port->port->serial, MOS_WRITE,
-		   MOS_UART_REG, MCR, &data);
+	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, MCR, &data);
 
 	/* Determine divisor based on baud rate */
 	baud = tty_get_baud_rate(tty);
-	DPRINTK("%s-- baud = %d\n", "Back from <tty_get_baud_rate>...", baud);
+	dev_dbg(&port->dev, "got baud=%d from tty_get_baud_rate()\n", baud);
 
 	if (baud > 115200) {
 		set_high_rates(mos7703_port, &baud);
 		/* Enable Interrupts */
 		data = 0x0c;
-		SendMosCmd(mos7703_port->port->serial, MOS_WRITE, MOS_UART_REG,
-			   IER, &data);
+		SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, IER, &data);
 		return;
 	}
 	if (!baud) {
-		DPRINTK("%s\n", "Picked default baud...");
 		baud = 9600;
+		dev_dbg(&port->dev, "Picked default baudrate %d\n", baud);
 	}
 
-	dbg("%s - baud rate = %d", __FUNCTION__, baud);
+	dev_dbg(&port->dev, "%s - baud rate = %d\n", __func__, baud);
 	status = send_cmd_write_baud_rate(mos7703_port, baud);
 	wake_up(&mos7703_port->delta_msr_wait);
 	mos7703_port->delta_msr_cond = 1;
@@ -831,20 +762,18 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	struct urb *urb;
 	struct ktermios *old_termios;
 	struct moschip_port *mos7703_port;
+	int allocated_urbs = 0;
 
-	DPRINTK("%s \n", __FUNCTION__);
 	serial = port->serial;
 	mos7703_port = usb_get_serial_port_data(port);
-
 	if (mos7703_port == NULL) {
-		DPRINTK("%s", "Null port,Returning with ENODEV \n");
 		return -ENODEV;
 	}
 	mos7703_port->tty = tty;
 
 	port0 = serial->port[0];
 	if (port0 == NULL) {
-		DPRINTK("%s", "Null Serial Port0, Returning with ENODEV \n");
+		dev_err(&port->dev, "Null serial->port[0], returning ENODEV\n");
 		return -ENODEV;
 	}
 
@@ -852,18 +781,20 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	for (j = 0; j < NUM_URBS; ++j) {
 		urb = usb_alloc_urb(0, GFP_KERNEL);
 		mos7703_port->write_urb_pool[j] = urb;
-
-		if (urb == NULL) {
-			err(" ********** No more urbs???");
+		if (!urb)
 			continue;
-		}
 
 		urb->transfer_buffer = kmalloc(URB_TRANSFER_BUFFER_SIZE, GFP_KERNEL);
 		if (!urb->transfer_buffer) {
-			err(" **************** %s-out of memory for urb buffers.", __FUNCTION__);
+			usb_free_urb(mos7703_port->write_urb_pool[j]);
+			mos7703_port->write_urb_pool[j] = NULL;
 			continue;
 		}
+		++allocated_urbs;
 	}
+
+	if (!allocated_urbs)
+		return -ENOMEM;
 
         /* update DCR0 DCR1 DCR2 DCR3 */
 
@@ -883,11 +814,7 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, 0x07, &data);
 	SendMosCmd(port->serial, MOS_WRITE, MOS_VEN_REG, 0x07, &data);
 
-	/*
-	 * 1: IER  2: FCR  3: LCR  4:MCR
-	 */
-
-	DPRINTK("%s", "Sending Command .......... \n");
+	/* 1: IER  2: FCR  3: LCR  4:MCR */
 
 	data = 0x02;
 	SendMosCmd(port->serial, MOS_WRITE, MOS_VEN_REG, 0x00, &data);
@@ -935,19 +862,15 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	if (tty)
 		tty->port->low_latency = 1;
 
-	DPRINTK("port number is %d \n", port->port_number);
-	DPRINTK("port bulk in endpoint is %x \n",
-		port->bulk_in_endpointAddress);
-	DPRINTK("port bulk out endpoint is %x \n",
-		port->bulk_out_endpointAddress);
-	DPRINTK("port int end point  %x \n",
-		port->interrupt_in_endpointAddress);
+	dev_dbg(&port->dev, "port number: %d, bulk in ep: %x, "
+		"bulk out ep: %x, int in ep: %x\n",
+		port->port_number, port->bulk_in_endpointAddress,
+		port->bulk_out_endpointAddress, port->interrupt_in_endpointAddress);
 
 	mos7703_port->read_urb = port->read_urb;
 
 	/* set up our bulk in urb */
-	usb_fill_bulk_urb(mos7703_port->read_urb,
-			  serial->dev,
+	usb_fill_bulk_urb(mos7703_port->read_urb, serial->dev,
 			  usb_rcvbulkpipe(serial->dev,
 					  port->bulk_in_endpointAddress),
 			  port->bulk_in_buffer,
@@ -955,10 +878,9 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 			  mos7703_bulk_in_callback, mos7703_port);
 
 	response = usb_submit_urb(mos7703_port->read_urb, GFP_KERNEL);
-
 	if (response) {
-		err("%s - Error %d submitting control urb", __FUNCTION__,
-		    response);
+		dev_err(&port->dev, "%s - Error %d submitting control urb\n",
+			__func__, response);
 	}
 
 	/* initialize our wait queue */
@@ -969,8 +891,6 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 
 	/* Must always set this bit to enable ints! */
 	mos7703_port->shadowMCR = MCR_MASTER_IE;
-
-	/* send a open port command */
 	mos7703_port->openPending = 0;
 	mos7703_port->open = 1;
 
@@ -1014,18 +934,17 @@ static void mos7703_close(struct usb_serial_port *port)
 	if (mos7703_port->port->serial->dev) {
                 /* flush and block until tx is empty*/
 		if (mos7703_port->write_urb) {
-			DPRINTK("%s", "Shutdown bulk write\n");
+			dev_dbg(&port->dev, "Shutdown bulk write\n");
 			usb_kill_urb(mos7703_port->write_urb);
 		}
 		if (mos7703_port->read_urb) {
-			DPRINTK("%s", "Shutdown bulk read\n");
+			dev_dbg(&port->dev, "Shutdown bulk read\n");
 			usb_kill_urb(mos7703_port->read_urb);
 		}
 	}
 
 	if (mos7703_port->write_urb) {
 		/* if this urb had a transfer buffer already (old tx) free it */
-
 		if (mos7703_port->write_urb->transfer_buffer != NULL) {
 			kfree(mos7703_port->write_urb->transfer_buffer);
 		}
@@ -1040,8 +959,6 @@ static void mos7703_close(struct usb_serial_port *port)
 
 	mos7703_port->open = 0;
 	mos7703_port->openPending = 0;
-
-	DPRINTK("%s \n", "Leaving ............");
 }
 
 /*****************************************************************************
@@ -1060,12 +977,13 @@ static int mos7703_write_room(struct tty_struct *tty)
 
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL) {
-		DPRINTK("%s", "Null port,Returning with ENODEV \n");
+		dev_err(&port->dev, "%s: Null port, return ENODEV\n", __func__);
 		return -ENODEV;
 	}
 
 	for (i = 0; i < NUM_URBS; ++i) {
-		if (mos7703_port->write_urb_pool[i]->status != -EINPROGRESS) {
+		if (mos7703_port->write_urb_pool[i] &&
+		    mos7703_port->write_urb_pool[i]->status != -EINPROGRESS) {
 			room += URB_TRANSFER_BUFFER_SIZE;
 		}
 	}
@@ -1091,7 +1009,7 @@ static int mos7703_chars_in_buffer(struct tty_struct *tty)
 
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL) {
-		DPRINTK("%s", "Null port,Returning with ENODEV \n");
+		dev_err(&port->dev, "%s: Null port, return ENODEV\n", __func__);
 		return -ENODEV;
 	}
 	for (i = 0; i < NUM_URBS; ++i) {
@@ -1124,21 +1042,22 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL) {
-		DPRINTK("%s", "mos7703_port is NULL\n");
-		return -1;
+		return -ENODEV;
 	}
 
-	/* try to find a free urb in our list of them */
+	/* try to find a free urb in our list */
 	urb = NULL;
 	for (i = 0; i < NUM_URBS; ++i) {
-		if (mos7703_port->write_urb_pool[i]->status != -EINPROGRESS) {
+		if (mos7703_port->write_urb_pool[i] &&
+		    mos7703_port->write_urb_pool[i]->status != -EINPROGRESS) {
 			urb = mos7703_port->write_urb_pool[i];
+			dev_dbg(&port->dev, "URB:%d\n", i);
 			break;
 		}
 	}
 
 	if (urb == NULL) {
-		dbg("%s - ################ no more free urbs\n", __FUNCTION__);
+		dev_dbg(&port->dev, "%s - no more free urbs\n", __func__);
 		goto exit;
 	}
 
@@ -1147,20 +1066,16 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 	}
 
 	if (urb->transfer_buffer == NULL) {
-		err("***** %s This should not happen", __FUNCTION__);
-		urb->transfer_buffer =
-		    kmalloc(URB_TRANSFER_BUFFER_SIZE, GFP_KERNEL);
-
+		urb->transfer_buffer = kmalloc(URB_TRANSFER_BUFFER_SIZE, GFP_KERNEL);
 		if (urb->transfer_buffer == NULL) {
-			err("%s no more kernel memory...", __FUNCTION__);
 			goto exit;
 		}
 	}
 
 	transfer_size = min(count, URB_TRANSFER_BUFFER_SIZE);
 	memcpy(urb->transfer_buffer, current_position, transfer_size);
-	DPRINTK("transfer_size:%d	transfer_buffer:%s\n", transfer_size,
-		(char *)urb->transfer_buffer);
+	usb_serial_debug_data(&port->dev, __func__, transfer_size,
+			      urb->transfer_buffer);
 
 	/* fill up the urb with all of our data and submit it */
 	usb_fill_bulk_urb(urb, mos7703_port->port->serial->dev,
@@ -1172,13 +1087,11 @@ static int mos7703_write(struct tty_struct *tty, struct usb_serial_port *port,
 	/* send it down the pipe */
 	status = usb_submit_urb(urb, GFP_KERNEL);
 	if (status) {
-		err("%s - usb_submit_urb(write bulk) failed with status = %d\n",
-		    __FUNCTION__, status);
+		dev_err(&port->dev, "%s - usb_submit_urb(write bulk) failed "
+			"with status = %d\n", __func__, status);
 		bytes_sent = status;
-		DPRINTK("URB Status Fail !!!!!!\n");
 		goto exit;
 	}
-
 	bytes_sent = transfer_size;
  exit:
 	return bytes_sent;
@@ -1195,19 +1108,11 @@ static void mos7703_throttle(struct tty_struct *tty)
 	struct moschip_port *mos7703_port;
 	int status;
 
-	DPRINTK("- port %d\n", port->port_number);
-
 	mos7703_port = usb_get_serial_port_data(port);
-
 	if (mos7703_port == NULL)
 		return;
 	if (!mos7703_port->open) {
-		DPRINTK("%s\n", "port not opened");
-		return;
-	}
-
-	if (!tty) {
-		dbg("%s - no tty available", __FUNCTION__);
+		dev_dbg(&port->dev, "%s - port not opened\n", __func__);
 		return;
 	}
 
@@ -1215,22 +1120,18 @@ static void mos7703_throttle(struct tty_struct *tty)
 	if (I_IXOFF(tty)) {
 		unsigned char stop_char = STOP_CHAR(tty);
 		status = mos7703_write(tty, port, &stop_char, 1);
-		if (status <= 0) {
+		if (status <= 0)
 			return;
-		}
 	}
 
 	/* if we are implementing RTS/CTS, toggle that line */
 	if (tty->termios.c_cflag & CRTSCTS) {
-
 		mos7703_port->shadowMCR &= ~MCR_RTS;
 		status = SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, MCR,
 				    &mos7703_port->shadowMCR);
-		if (status != 0) {
+		if (status != 0)
 			return;
-		}
 	}
-
 	return;
 }
 
@@ -1249,11 +1150,7 @@ static void mos7703_unthrottle(struct tty_struct *tty)
 		return;
 
 	if (!mos7703_port->open) {
-		dbg("%s - port not opened", __FUNCTION__);
-		return;
-	}
-	if (!tty) {
-		dbg("%s - no tty available", __FUNCTION__);
+		dev_dbg(&port->dev, "%s - port not opened\n", __func__);
 		return;
 	}
 
@@ -1261,9 +1158,8 @@ static void mos7703_unthrottle(struct tty_struct *tty)
 	if (I_IXOFF(tty)) {
 		unsigned char start_char = START_CHAR(tty);
 		status = mos7703_write(tty, port, &start_char, 1);
-		if (status <= 0) {
+		if (status <= 0)
 			return;
-		}
 	}
 
 	/* if we are implementing RTS/CTS, toggle that line */
@@ -1271,17 +1167,16 @@ static void mos7703_unthrottle(struct tty_struct *tty)
 		mos7703_port->shadowMCR |= MCR_RTS;
 		status = SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, MCR,
 				    &mos7703_port->shadowMCR);
-		if (status != 0) {
+		if (status != 0)
 			return;
-		}
 	}
-
 	return;
 }
 
 /*****************************************************************************
  * SerialSetTermios
- * this function is called by the tty driver when it wants to change the termios structure
+ * this function is called by the tty driver when it wants to change the
+ * termios structure
  *****************************************************************************/
 static void mos7703_set_termios(struct tty_struct *tty,
 				struct usb_serial_port *port,
@@ -1295,13 +1190,8 @@ static void mos7703_set_termios(struct tty_struct *tty,
 	if (mos7703_port == NULL)
 		return;
 
-	if (!tty) {
-		dbg("%s - no tty", __FUNCTION__);
-		return;
-	}
-
 	if (!mos7703_port->open) {
-		dbg("%s - port not opened", __FUNCTION__);
+		dev_dbg(&port->dev, "%s - port not opened\n", __func__);
 		return;
 	}
 
@@ -1312,36 +1202,30 @@ static void mos7703_set_termios(struct tty_struct *tty,
 		if ((cflag == old_termios->c_cflag) &&
 		    (RELEVANT_IFLAG(tty->termios.c_iflag) ==
 		     RELEVANT_IFLAG(old_termios->c_iflag))) {
-
-			DPRINTK("%s\n", "Nothing to change");
 			return;
 		}
 	}
 
-	dbg("%s - clfag %08x iflag %08x", __FUNCTION__,
-	    tty->termios.c_cflag, RELEVANT_IFLAG(tty->termios.c_iflag));
+	dev_dbg(&port->dev, "%s - cflag=%08x iflag=%08x\n", __func__,
+		tty->termios.c_cflag, RELEVANT_IFLAG(tty->termios.c_iflag));
 
 	if (old_termios) {
-		dbg("%s - old clfag %08x old iflag %08x", __FUNCTION__,
+		dev_dbg(&port->dev, "%s - old cflag=%08x old iflag=%08x\n", __func__,
 		    old_termios->c_cflag, RELEVANT_IFLAG(old_termios->c_iflag));
 	}
-
-	dbg("%s - port %d", __FUNCTION__, port->port_number);
 
 	/* change the port settings to the new ones specified */
 	change_port_settings(tty, mos7703_port, old_termios);
 
 	if (mos7703_port->read_urb->status != -EINPROGRESS) {
-
 		mos7703_port->read_urb->dev = mos7703_port->port->serial->dev;
 		status = usb_submit_urb(mos7703_port->read_urb, GFP_KERNEL);
 		if (status) {
-			DPRINTK
-			    (" usb_submit_urb(read bulk) failed, status = %d",
-			     status);
+			dev_dbg(&port->dev,
+				"usb_submit_urb(read bulk) failed, status = %d\n",
+				status);
 		}
 	}
-
 	return;
 }
 
@@ -1374,9 +1258,7 @@ static int set_modem_info(struct moschip_port *mos7703_port, unsigned int cmd,
 	unsigned int mcr;
 	unsigned int arg;
 	unsigned char data;
-
 	struct usb_serial_port *port;
-	DPRINTK("%s \n", "set_modem_info:entering...........");
 
 	if (mos7703_port == NULL)
 		return -1;
@@ -1398,7 +1280,6 @@ static int set_modem_info(struct moschip_port *mos7703_port, unsigned int cmd,
 		break;
 
 	case TIOCMBIC:
-
 		if (arg & TIOCM_RTS)
 			mcr &= ~MCR_RTS;
 		if (arg & TIOCM_DTR)
@@ -1408,10 +1289,8 @@ static int set_modem_info(struct moschip_port *mos7703_port, unsigned int cmd,
 		break;
 
 	case TIOCMSET:
-
 		/* turn off the RTS and DTR and LOOPBACK 
 		 * and then only turn on what was asked to */
-
 		mcr &= ~(MCR_RTS | MCR_DTR | MCR_LOOPBACK);
 		mcr |= ((arg & TIOCM_RTS) ? MCR_RTS : 0);
 		mcr |= ((arg & TIOCM_DTR) ? MCR_DTR : 0);
@@ -1420,10 +1299,8 @@ static int set_modem_info(struct moschip_port *mos7703_port, unsigned int cmd,
 	}
 
 	mos7703_port->shadowMCR = mcr;
-
 	data = mos7703_port->shadowMCR;
 	SendMosCmd(port->serial, MOS_WRITE, MOS_UART_REG, MCR, &data);
-	DPRINTK("%s \n", "set_modem_info:leaving...........");
 	return 0;
 }
 
@@ -1433,7 +1310,6 @@ static int get_modem_info(struct moschip_port *mos7703_port,
 	unsigned int result = 0;
 	unsigned int msr = mos7703_port->shadowMSR;
 	unsigned int mcr = mos7703_port->shadowMCR;
-	DPRINTK("%s \n", "get_modem_info:entering...........");
 
 	result = ((mcr & MCR_DTR) ? TIOCM_DTR : 0)	     /* 0x002 */
 	       | ((mcr & MCR_RTS) ? TIOCM_RTS : 0)	     /* 0x004 */
@@ -1442,11 +1318,8 @@ static int get_modem_info(struct moschip_port *mos7703_port,
 	       | ((msr & MOS7703_MSR_RI) ? TIOCM_RI : 0)     /* 0x080 */
 	       | ((msr & MOS7703_MSR_DSR) ? TIOCM_DSR : 0);  /* 0x100 */
 
-	dbg("%s -- %x", __FUNCTION__, result);
-
 	if (copy_to_user(value, &result, sizeof(int)))
 		return -EFAULT;
-	DPRINTK("%s \n", "get_modem_info:leaving...........");
 	return 0;
 }
 
@@ -1475,7 +1348,6 @@ static int get_serial_info(struct moschip_port *mos7703_port,
 
 	if (copy_to_user(retinfo, &tmp, sizeof(*retinfo)))
 		return -EFAULT;
-
 	return 0;
 }
 
@@ -1496,42 +1368,39 @@ static int mos7703_ioctl(struct tty_struct *tty,
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL)
 		return -1;
-	dbg("%s - port %d, cmd = 0x%x", __FUNCTION__, port->port_number, cmd);
 
 	switch (cmd) {
 	case TIOCSERGETLSR:
-		dbg("%s (%d) TIOCSERGETLSR", __FUNCTION__, port->port_number);
+		dev_dbg(&port->dev, "%s (%d) TIOCSERGETLSR\n", __func__,
+			port->port_number);
 		return get_lsr_info(tty, mos7703_port, (unsigned int *)arg);
-
 	case TIOCMBIS:
 	case TIOCMBIC:
 	case TIOCMSET:
-		dbg("%s (%d) TIOCMSET/TIOCMBIC/TIOCMSET", __FUNCTION__,
-		    port->port_number);
+		dev_dbg(&port->dev, "%s (%d) TIOCMSET/TIOCMBIC/TIOCMSET\n",
+			__func__, port->port_number);
 		return set_modem_info(mos7703_port, cmd, (unsigned int *)arg);
-
 	case TIOCMGET:
-		dbg("%s (%d) TIOCMGET", __FUNCTION__, port->port_number);
+		dev_dbg(&port->dev, "%s (%d) TIOCMGET\n", __func__,
+			port->port_number);
 		return get_modem_info(mos7703_port, (unsigned int *)arg);
-
 	case TIOCGSERIAL:
-		dbg("%s (%d) TIOCGSERIAL", __FUNCTION__, port->port_number);
+		dev_dbg(&port->dev, "%s (%d) TIOCGSERIAL\n", __func__,
+			port->port_number);
 		return get_serial_info(mos7703_port, (struct serial_struct *)arg);
-
 	case TIOCSSERIAL:
-		dbg("%s (%d) TIOCSSERIAL", __FUNCTION__, port->port_number);
+		dev_dbg(&port->dev, "%s (%d) TIOCSSERIAL\n", __func__,
+			port->port_number);
 		break;
-
 	case TIOCMIWAIT:
-		dbg("%s (%d) TIOCMIWAIT", __FUNCTION__, port->port_number);
+		dev_dbg(&port->dev, "%s (%d) TIOCMIWAIT\n", __func__,
+			port->port_number);
 		cprev = mos7703_port->icount;
-
 		while (1) {
 			mos7703_port->delta_msr_cond = 0;
 			wait_event_interruptible(mos7703_port->delta_msr_wait,
 						 (mos7703_port->
 						  delta_msr_cond == 1));
-
 			/* see if a signal did it */
 			if (signal_pending(current))
 				return -ERESTARTSYS;
@@ -1544,17 +1413,13 @@ static int mos7703_ioctl(struct tty_struct *tty,
 			    ((arg & TIOCM_DSR) && (cnow.dsr != cprev.dsr)) ||
 			    ((arg & TIOCM_CD) && (cnow.dcd != cprev.dcd)) ||
 			    ((arg & TIOCM_CTS) && (cnow.cts != cprev.cts))) {
-
 				return 0;
 			}
-
 			cprev = cnow;
 		}
 		/* NOTREACHED */
 		break;
-
 	case TIOCGICOUNT:
-
 		cnow = mos7703_port->icount;
 		icount.cts = cnow.cts;
 		icount.dsr = cnow.dsr;
@@ -1568,15 +1433,13 @@ static int mos7703_ioctl(struct tty_struct *tty,
 		icount.brk = cnow.brk;
 		icount.buf_overrun = cnow.buf_overrun;
 
-		dbg("%s (%d) TIOCGICOUNT RX=%d, TX=%d", __FUNCTION__,
-		    port->port_number, icount.rx, icount.tx);
+		dev_dbg(&port->dev, "%s (%d) TIOCGICOUNT RX=%d, TX=%d\n",
+			__func__, port->port_number, icount.rx, icount.tx);
 
 		if (copy_to_user((void *)arg, &icount, sizeof(icount)))
 			return -EFAULT;
-
 		return 0;
 	}
-
 	return -ENOIOCTLCMD;
 }
 
@@ -1586,36 +1449,26 @@ static int mos7703_ioctl(struct tty_struct *tty,
 static int mos7703_startup(struct usb_serial *serial)
 {
 	struct moschip_port *mos7703_port;
-	struct usb_device *dev;
+	struct usb_device *dev = serial->dev;
 	int i;
-
-	if (!serial) {
-		DPRINTK("%s\n", "Invalid Handler");
-		return -1;
-	}
-
-	dev = serial->dev;
 
 	/* we set up the pointers to the endpoints in the mos7703_open function, 
 	 * as the structures aren't created yet. */
 
 	/* set up our port private structures */
 	for (i = 0; i < serial->num_ports; ++i) {
-
 		mos7703_port = kmalloc(sizeof(struct moschip_port), GFP_KERNEL);
 		if (mos7703_port == NULL) {
 			usb_set_serial_data(serial, NULL);
-			err("%s - Out of memory", __FUNCTION__);
+			dev_err(&dev->dev, "%s - Out of memory\n", __func__);
 			return -ENOMEM;
 		}
 		memset(mos7703_port, 0, sizeof(struct moschip_port));
 
 		/* Initialize all port interrupt end point to port 0 int endpoint
 		 * Our device has only one interrupt end point common to all ports */
-
 		serial->port[i]->interrupt_in_endpointAddress =
 		    serial->port[0]->interrupt_in_endpointAddress;
-
 		mos7703_port->port = serial->port[i];
 		usb_set_serial_port_data(serial->port[i], mos7703_port);
 	}
@@ -1627,9 +1480,7 @@ static int mos7703_startup(struct usb_serial *serial)
 	/* setting configuration feature to one */
 	usb_control_msg(serial->dev, usb_sndctrlpipe(serial->dev, 0),
 			(u8) 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 5 * HZ);
-
 	return 0;
-
 }
 
 static struct usb_serial_driver mcs7703_driver = {
