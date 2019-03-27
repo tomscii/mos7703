@@ -31,6 +31,7 @@
 #include <asm/uaccess.h>
 #include <linux/usb.h>
 #include <linux/usb/serial.h>
+#include <linux/sched/signal.h>
 
 
 #define DRIVER_AUTHOR "Moschip Semiconductor Tech. Ltd."
