@@ -840,13 +840,6 @@ static int mos7703_open(struct tty_struct *tty, struct usb_serial_port *port)
 	 * mos7703_startup as the structures were not set up at that time.)
 	 */
 
-        /* force low_latency on so that our tty_push actually forces
-	 * the data through, otherwise it is scheduled, and with high
-	 * data rates (like with OHCI) data can get lost.
-	 */
-	if (tty)
-		tty->port->low_latency = 1;
-
 	dev_dbg(&port->dev, "port number: %d, bulk in ep: %x, "
 		"bulk out ep: %x, int in ep: %x\n",
 		port->port_number, port->bulk_in_endpointAddress,
@@ -953,7 +946,7 @@ static void mos7703_close(struct usb_serial_port *port)
  * If successful, we return the amount of room that we have for this port
  * Otherwise we return a negative error number.
  *****************************************************************************/
-static int mos7703_write_room(struct tty_struct *tty)
+static unsigned int mos7703_write_room(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	int i;
@@ -962,8 +955,8 @@ static int mos7703_write_room(struct tty_struct *tty)
 
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL) {
-		dev_err(&port->dev, "%s: Null port, return ENODEV\n", __func__);
-		return -ENODEV;
+		dev_err(&port->dev, "%s: Null port, return 0\n", __func__);
+		return 0;
 	}
 
 	for (i = 0; i < NUM_URBS; ++i) {
@@ -983,9 +976,9 @@ static int mos7703_write_room(struct tty_struct *tty)
  * been written, but hasn't made it out the port yet)
  * If successful, we return the number of bytes left to be written in the 
  * system,
- * Otherwise we return a negative error number.
+ * Otherwise we return 0.
  *****************************************************************************/
-static int mos7703_chars_in_buffer(struct tty_struct *tty)
+static unsigned int mos7703_chars_in_buffer(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	int i;
@@ -995,7 +988,7 @@ static int mos7703_chars_in_buffer(struct tty_struct *tty)
 	mos7703_port = usb_get_serial_port_data(port);
 	if (mos7703_port == NULL) {
 		dev_err(&port->dev, "%s: Null port, return ENODEV\n", __func__);
-		return -ENODEV;
+		return 0;
 	}
 	for (i = 0; i < NUM_URBS; ++i) {
 		if (mos7703_port->write_urb_pool[i]->status == -EINPROGRESS) {
