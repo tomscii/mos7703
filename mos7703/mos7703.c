@@ -590,7 +590,6 @@ static void change_port_settings(struct tty_struct *tty,
 {
 	int baud;
 	unsigned cflag;
-	unsigned iflag;
 	u8 mask = 0xff;
 	u8 lData;
 	u8 lParity;
@@ -616,7 +615,6 @@ static void change_port_settings(struct tty_struct *tty,
 
 	/* Change the data length */
 	cflag = tty->termios.c_cflag;
-	iflag = tty->termios.c_iflag;
 
 	switch (cflag & CSIZE) {
 	case CS5:
@@ -1172,19 +1170,17 @@ static void mos7703_set_termios(struct tty_struct *tty,
 
 	/* check that they really want us to change something */
 	if (old_termios) {
-		if ((cflag == old_termios->c_cflag) &&
-		    (RELEVANT_IFLAG(tty->termios.c_iflag) ==
-		     RELEVANT_IFLAG(old_termios->c_iflag))) {
+		if (cflag == old_termios->c_cflag) {
 			return;
 		}
 	}
 
-	dev_dbg(&port->dev, "%s - cflag=%08x iflag=%08x\n", __func__,
-		tty->termios.c_cflag, RELEVANT_IFLAG(tty->termios.c_iflag));
+	dev_dbg(&port->dev, "%s - cflag=%08x\n", __func__,
+		tty->termios.c_cflag);
 
 	if (old_termios) {
-		dev_dbg(&port->dev, "%s - old cflag=%08x old iflag=%08x\n", __func__,
-		    old_termios->c_cflag, RELEVANT_IFLAG(old_termios->c_iflag));
+		dev_dbg(&port->dev, "%s - old cflag=%08x\n", __func__,
+		    old_termios->c_cflag);
 	}
 
 	/* change the port settings to the new ones specified */
